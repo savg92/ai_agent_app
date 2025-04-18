@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Environment variables
+backend/.env
+frontend/.env
+
+# VSCode settings
+.vscode/
+
+# macOS
+.DS_Store
+
+# Node.js
+node_modules/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Data outputs (if generated)
+data/*.tmp
+data/*.log
+!data/
+data/*
+
+# Ignore local data if needed (uncomment if you want to ignore these)
+# data/local_news.json
+# data/tax_policies.txt

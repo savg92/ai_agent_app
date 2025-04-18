@@ -1,0 +1,258 @@
+import os
+from typing import Union, Optional, Dict, Any, List
+from dotenv import load_dotenv
+from langchain_community.document_loaders import UnstructuredFileLoader, JSONLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter # Changed import
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings # Or HuggingFaceEmbeddings
+from langchain_community.embeddings import BedrockEmbeddings # Uncomment if using Bedrock
+from langchain_openai import AzureOpenAIEmbeddings  # Correct import for Azure embeddings
+from langchain_community.document_loaders.csv_loader import CSVLoader
+from langchain_core.documents import Document # For type hinting
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+
+# Load environment variables from .env file
+load_dotenv()
+
+# --- Configuration ---
+CHROMA_DB_DIRECTORY = "chroma_db_store" # Persistent storage directory
+DATA_PATH = "../data" # Relative path to the data directory
+
+# --- Embedding Model Selection ---
+def get_embedding_function(provider=os.getenv("EMBEDDING_PROVIDER", "openai")):
+    """Selects and returns the embedding function based on the provider."""
+    provider = provider.lower()
+    print(f"Using embedding provider: {provider}")
+
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables.")
+        return OpenAIEmbeddings(api_key=api_key)
+    
+    elif provider == "ollama":
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL")
+        if not ollama_model:
+            raise ValueError("OLLAMA_MODEL not found in environment variables for Ollama provider.")
+        # Ensure ollama server is running if using this
+        print(f"Using Ollama model: {ollama_model} at {ollama_base_url}")
+        return OllamaEmbeddings(model=ollama_model, base_url=ollama_base_url)
+    
+    elif provider == "azure":
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        azure_api_base = os.getenv("AZURE_OPENAI_API_BASE")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+        azure_deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        if not all([azure_api_key, azure_api_base, azure_api_version, azure_deployment_name]):
+            raise ValueError("Missing required Azure OpenAI configuration in environment variables.")
+        return AzureOpenAIEmbeddings(
+            api_key=azure_api_key,
+            api_base=azure_api_base,
+            api_version=azure_api_version,
+            deployment=azure_deployment_name
+        )
+    
+    elif provider == "bedrock":
+        # Example for Bedrock (ensure you have the right credentials and setup)
+        bedrock_api_key = os.getenv("BEDROCK_API_KEY")
+        if not bedrock_api_key:
+            raise ValueError("BEDROCK_API_KEY not found in environment variables.")
+        return BedrockEmbeddings(api_key=bedrock_api_key)
+    
+    else:
+        # Default or fallback: Using Sentence Transformers (works well locally)
+        print("Provider not explicitly supported or specified, defaulting to Sentence Transformers (all-MiniLM-L6-v2).")
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+
+# --- Data Loading and Processing ---
+def load_documents_from_directory(directory_path):
+    """Loads documents from various file types in a directory."""
+    documents = []
+    for filename in os.listdir(directory_path):
+        file_path = os.path.join(directory_path, filename)
+        if not os.path.isfile(file_path):
+            continue
+
+        try:
+            if filename.endswith(".txt"):
+                loader = UnstructuredFileLoader(file_path)
+                documents.extend(loader.load())
+            elif filename.endswith(".json"):
+                # Adjust jq_schema based on your JSON structure if needed
+                loader = JSONLoader(file_path=file_path, jq_schema='.[].content', text_content=False)
+                # Or if the whole object is content: loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
+                loaded_json_docs = loader.load()
+                # Add metadata if desired (e.g., source from the JSON)
+                # For simplicity here, we just load the content.
+                documents.extend(loaded_json_docs)
+            elif filename.endswith(".csv"):
+                loader = CSVLoader(file_path=file_path)
+                documents.extend(loader.load())
+
+            print(f"Loaded documents from: {filename}")
+        except Exception as e:
+            print(f"Error loading {filename}: {e}")
+
+    return documents
+
+def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 100) -> List[Document]: # Added type hints
+    """Splits documents into smaller chunks using multiple separators including page breaks."""
+    # Using RecursiveCharacterTextSplitter for multiple separators.
+    # It tries separators in order: page break, double newline, single newline, space, then characters.
+    # Adjust '\f' if your documents use a different page break marker.
+    text_splitter = RecursiveCharacterTextSplitter(
+        separators=["\f", "\n\n", "\n", " ", ""],
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        is_separator_regex=False,
+    )
+    print(f"Splitting {len(documents)} documents using separators: {text_splitter.separators}")
+    split_docs: List[Document] = text_splitter.split_documents(documents)
+    print(f"Split into {len(split_docs)} chunks.")
+    return split_docs
+
+# --- Vector Database Operations ---
+def create_or_load_vector_db(documents=None, embedding_function=None, force_reload=False):
+    """
+    Creates a new Chroma vector database or loads an existing one.
+    If documents are provided and force_reload is True, it rebuilds the DB.
+    """
+    if not embedding_function:
+        embedding_function = get_embedding_function()
+
+    persist_directory = CHROMA_DB_DIRECTORY
+
+    if force_reload and documents:
+        print("Forcing reload of vector database...")
+        if os.path.exists(persist_directory):
+            import shutil
+            print(f"Removing existing database at {persist_directory}")
+            shutil.rmtree(persist_directory) # Be careful with this in production!
+
+        print("Splitting documents...")
+        texts = split_documents(documents)
+        if not texts:
+             print("No text chunks to add to the database.")
+             return None
+        print(f"Creating new vector database with {len(texts)} chunks...")
+        vector_db = Chroma.from_documents(
+            documents=texts,
+            embedding=embedding_function,
+            persist_directory=persist_directory
+        )
+        vector_db.persist()
+        print(f"Vector database created and persisted at {persist_directory}")
+        return vector_db
+    elif os.path.exists(persist_directory):
+        print(f"Loading existing vector database from {persist_directory}...")
+        vector_db = Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embedding_function
+        )
+        print("Vector database loaded.")
+        return vector_db
+    elif documents:
+         print("No existing database found. Creating a new one...")
+         print("Splitting documents...")
+         texts = split_documents(documents)
+         if not texts:
+             print("No text chunks to add to the database.")
+             return None
+         print(f"Creating new vector database with {len(texts)} chunks...")
+         vector_db = Chroma.from_documents(
+            documents=texts,
+            embedding=embedding_function,
+            persist_directory=persist_directory
+         )
+         vector_db.persist()
+         print(f"Vector database created and persisted at {persist_directory}")
+         return vector_db
+    else:
+        print("Error: No documents provided and no existing database found.")
+        return None
+
+
+# --- LLM Selection ---
+def get_llm(provider=os.getenv("LLM_PROVIDER", "openai")):
+    """Selects and initializes the LLM based on the provider."""
+    provider = provider.lower()
+    print(f"Using LLM provider: {provider}")
+
+    if provider == "openai":
+        from langchain_openai import OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables.")
+        return OpenAI(api_key=api_key)
+    elif provider == "ollama":
+        from langchain_community.llms import Ollama
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL")
+        if not ollama_model:
+            raise ValueError("OLLAMA_MODEL not found in environment variables for Ollama provider.")
+        print(f"Using Ollama model: {ollama_model} at {ollama_base_url}")
+        return Ollama(model=ollama_model, base_url=ollama_base_url)
+    # Add other providers:
+    elif provider == "azure":
+        from langchain_openai import AzureOpenAI
+        azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        azure_api_base = os.getenv("AZURE_OPENAI_API_BASE")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+        azure_deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        if not all([azure_api_key, azure_api_base, azure_api_version, azure_deployment_name]):
+            raise ValueError("Missing required Azure OpenAI configuration in environment variables.")
+        return AzureOpenAI(
+            api_key=azure_api_key,
+            api_base=azure_api_base,
+            api_version=azure_api_version,
+            deployment=azure_deployment_name
+        )
+    elif provider == "bedrock":
+        from langchain_community.llms import Bedrock
+        return Bedrock(...)
+    else:
+        raise ValueError(f"Unsupported LLM provider: {provider}")
+
+# --- QA Chain ---
+def create_qa_chain(vector_db, llm):
+    """Creates the RetrievalQA chain with a specific prompt."""
+    if not vector_db:
+         raise ValueError("Vector database is not initialized.")
+
+    template = """
+        Answer the following question based only on the provided context.
+        If the context does not contain the answer, state that you cannot answer based on the provided context.
+
+        Context:
+        {context}
+
+        Question:
+        {question}
+
+        Answer:
+        """
+    
+    # Adjust the prompt template as needed
+    QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
+
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff", # Loads all relevant chunks into the context window
+        retriever=vector_db.as_retriever(search_kwargs={"k": 3}), # Retrieve top 3 relevant chunks
+        return_source_documents=True, # Return the source chunks
+        chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
+    )
+    return qa_chain
+
+def answer_question(qa_chain, question):
+    """Answers a question using the QA chain."""
+    if not qa_chain:
+         raise ValueError("QA chain is not initialized.")
+    result = qa_chain.invoke({"query": question}) # Use invoke for newer Langchain versions
+    return result["result"], result["source_documents"]
