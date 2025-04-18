@@ -1,7 +1,8 @@
 import os
 import logging # Import logging
-from typing import Union, Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple
 from dotenv import load_dotenv
+import shutil
 from langchain_community.document_loaders import UnstructuredFileLoader, JSONLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter # Changed import
 from langchain_community.vectorstores import Chroma
@@ -16,6 +17,11 @@ from langchain.prompts import PromptTemplate
 from langchain_core.language_models.llms import BaseLanguageModel # Import BaseLanguageModel
 from langchain_core.embeddings import Embeddings # Import Embeddings
 from langchain_core.vectorstores import VectorStore # Import VectorStore
+from langchain_community.llms import Bedrock
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_openai import OpenAI
+from langchain_community.llms import Ollama
+from langchain_openai import AzureOpenAI
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,13 +46,14 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         return OpenAIEmbeddings(api_key=api_key)
     
     elif provider == "ollama":
-        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        ollama_model = os.getenv("OLLAMA_MODEL")
-        if not ollama_model:
-            raise ValueError("OLLAMA_MODEL not found in environment variables for Ollama provider.")
+        ollama_base_url: Optional[str] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_embedding_model: Optional[str] = os.getenv("OLLAMA_EMBEDDING_MODEL") # Use specific embedding model variable
+        if not ollama_embedding_model:
+            logging.error("OLLAMA_EMBEDDING_MODEL not found in environment variables for Ollama embedding provider.") 
+            raise ValueError("OLLAMA_EMBEDDING_MODEL not found in environment variables for Ollama embedding provider.")
         # Ensure ollama server is running if using this
-        logging.info(f"Using Ollama model: {ollama_model} at {ollama_base_url}")
-        return OllamaEmbeddings(model=ollama_model, base_url=ollama_base_url)
+        logging.info(f"Using Ollama embedding model: {ollama_embedding_model} at {ollama_base_url}")
+        return OllamaEmbeddings(model=ollama_embedding_model, base_url=ollama_base_url)
     
     elif provider == "azure":
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -65,16 +72,34 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         )
     
     elif provider == "bedrock":
-        # Example for Bedrock (ensure you have the right credentials and setup)
-        bedrock_api_key = os.getenv("BEDROCK_API_KEY")
-        if not bedrock_api_key:
-            raise ValueError("BEDROCK_API_KEY not found in environment variables.")
-        return BedrockEmbeddings(api_key=bedrock_api_key)
+        # Ensure necessary AWS credentials and region are configured in the environment
+        # (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
+        # or via an IAM role or profile.
+        model_id: Optional[str] = os.getenv("BEDROCK_EMBEDDING_MODEL_ID")
+        region_name: Optional[str] = os.getenv("AWS_REGION") # Bedrock often requires region
+        credentials_profile_name: Optional[str] = os.getenv("BEDROCK_PROFILE_NAME") # Optional: for specific AWS profiles
+
+        if not model_id:
+            logging.error("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
+            raise ValueError("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
+        if not region_name:
+             logging.warning("AWS_REGION not set for Bedrock embeddings, it might default or fail.")
+
+        logging.info(f"Using Bedrock embedding model: {model_id} in region {region_name or 'default'}")
+        bedrock_params: Dict[str, Any] = {
+            "model_id": model_id,
+            # client=None, # Let LangChain handle client creation by default
+        }
+        if region_name:
+            bedrock_params["region_name"] = region_name
+        if credentials_profile_name:
+            bedrock_params["credentials_profile_name"] = credentials_profile_name
+
+        return BedrockEmbeddings(**bedrock_params)
     
     else:
         # Default or fallback: Using Sentence Transformers (works well locally)
         logging.info("Provider not explicitly supported or specified, defaulting to Sentence Transformers (all-MiniLM-L6-v2).")
-        from langchain_community.embeddings import HuggingFaceEmbeddings
         return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
@@ -149,7 +174,6 @@ def create_or_load_vector_db(
     if force_reload and documents:
         logging.info("Forcing reload of vector database...")
         if os.path.exists(persist_directory):
-            import shutil
             logging.info(f"Removing existing database at {persist_directory}")
             shutil.rmtree(persist_directory) # Be careful with this in production!
 
@@ -203,23 +227,20 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
     logging.info(f"Using LLM provider: {provider}")
 
     if provider == "openai":
-        from langchain_openai import OpenAI
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables.")
         return OpenAI(api_key=api_key)
     elif provider == "ollama":
-        from langchain_community.llms import Ollama
-        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        ollama_model = os.getenv("OLLAMA_MODEL")
-        if not ollama_model:
-            logging.error("OLLAMA_MODEL not found in environment variables for Ollama provider.")
-            raise ValueError("OLLAMA_MODEL not found in environment variables for Ollama provider.")
-        logging.info(f"Using Ollama model: {ollama_model} at {ollama_base_url}")
-        return Ollama(model=ollama_model, base_url=ollama_base_url)
+        ollama_base_url: Optional[str] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_llm_model: Optional[str] = os.getenv("OLLAMA_LLM_MODEL") # Use specific LLM model variable
+        if not ollama_llm_model:
+            logging.error("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
+            raise ValueError("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
+        logging.info(f"Using Ollama LLM model: {ollama_llm_model} at {ollama_base_url}")
+        return Ollama(model=ollama_llm_model, base_url=ollama_base_url)
     # Add other providers:
     elif provider == "azure":
-        from langchain_openai import AzureOpenAI
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") # Use ENDPOINT consistently
         azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
@@ -235,7 +256,7 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             azure_deployment=azure_llm_deployment # Use specific deployment
         )
     elif provider == "bedrock":
-        from langchain_community.llms import Bedrock
+        
         # Ensure necessary AWS credentials and region are configured in the environment
         # (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
         # or via an IAM role or profile.
