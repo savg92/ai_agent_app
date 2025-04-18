@@ -154,12 +154,11 @@ curl -X 'POST' \
 *   [ChromaDB](https://www.trychroma.com/)
 *   [Ollama](https://ollama.com/)
 *   [OpenAI](https://openai.com/)
-*   [Azure](https://azure.microsoft.com/)
+*   [AzureAI](https://azure.microsoft.com/en-us/services/cognitive-services/openai-service/)
 *   [Bedrock](https://aws.amazon.com/bedrock/)
 *   [HuggingFace](https://huggingface.co/)
 *   [jq](https://stedolan.github.io/jq/)
 *   [JSONLoader](https://www.example.com/jsonloader)
-*   [Azure](https://azure.microsoft.com/)
 
 ## Troubleshooting
 *   If you encounter issues with the database or LLM provider, check the logs for error messages.
