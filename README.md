@@ -173,7 +173,6 @@ curl -X 'POST' \\
 
 ## Future Improvements
 *   Add more detailed error handling and logging.
-*   Implement a more sophisticated frontend interface.
 *   Support for more document formats and data sources.
 *   Add user authentication and authorization for the API.
 *   Implement caching for frequently asked questions to improve performance.
@@ -184,5 +183,3 @@ curl -X 'POST' \\
 *   Consider replacing the in-memory chat history with a persistent solution (e.g., Redis, database) for production use.
 *   Explore integration with other AI tools and platforms for enhanced capabilities.
 *   Consider adding a frontend application for a better user experience.
-*   Explore the use of other vector databases for improved performance and scalability.
-*   Add support for more languages and localization.
