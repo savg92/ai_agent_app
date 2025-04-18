@@ -22,6 +22,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import OpenAI
 from langchain_community.llms import Ollama
 from langchain_openai import AzureOpenAI
+import pathlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -30,8 +31,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 load_dotenv()
 
 # --- Configuration ---
-CHROMA_DB_DIRECTORY = "chroma_db_store"
-DATA_PATH = "../data"
+# Get the directory where utils.py resides
+BACKEND_DIR = pathlib.Path(__file__).parent.resolve()
+PROJECT_ROOT = BACKEND_DIR.parent.resolve()
+# Define paths relative to the project structure
+CHROMA_DB_DIRECTORY = str(BACKEND_DIR / "chroma_db_store")
+DATA_PATH = str(PROJECT_ROOT / "data")
 
 # --- Embedding Model Selection ---
 def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "openai")) -> Embeddings:
@@ -100,9 +105,13 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
 
 
 # --- Data Loading and Processing ---
-def load_documents_from_directory(directory_path: str) -> List[Document]:
-    """Loads documents from various file types in a directory."""
+def load_documents_from_directory(directory_path: str) -> Tuple[List[Document], List[str]]:
+    """
+    Loads documents from various file types in a directory.
+    Returns a tuple containing a list of loaded documents and a list of failed file paths.
+    """
     documents: List[Document] = []
+    failed_files: List[str] = [] # Keep track of files that failed to load
     logging.info(f"Loading documents from directory: {directory_path}")
     for filename in os.listdir(directory_path):
         file_path = os.path.join(directory_path, filename)
@@ -114,11 +123,11 @@ def load_documents_from_directory(directory_path: str) -> List[Document]:
                 loader = UnstructuredFileLoader(file_path)
                 documents.extend(loader.load())
             elif filename.endswith(".json"):
-                # Load the entire JSON content as text for broader compatibility.
-                # This might include JSON keys/structure in the loaded document.
-                # For specific structures, you might revert to a targeted jq_schema.
-                loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
+                # Use text_content=False (default) to create a Document per JSON object (if list)
+                # The page_content will be the string representation of the object.
+                loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=False)
                 loaded_json_docs = loader.load()
+                logging.info(f"Loaded {len(loaded_json_docs)} document(s) from JSON file: {filename}")
                 documents.extend(loaded_json_docs)
             elif filename.endswith(".csv"):
                 loader = CSVLoader(file_path=file_path)
@@ -126,10 +135,14 @@ def load_documents_from_directory(directory_path: str) -> List[Document]:
 
             logging.debug(f"Loaded documents from: {filename}")
         except Exception as e:
-            logging.error(f"Error loading {filename}: {e}", exc_info=True)
+            # Log the error and add the file path to the failed list
+            logging.error(f"Error loading {file_path}: {e}", exc_info=True)
+            failed_files.append(file_path)
 
-    logging.info(f"Finished loading documents. Total loaded: {len(documents)}")
-    return documents
+    logging.info(f"Finished loading documents. Total loaded: {len(documents)}. Failed files: {len(failed_files)}")
+    if failed_files:
+        logging.warning(f"Failed to load the following files: {failed_files}")
+    return documents, failed_files
 
 def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 100) -> List[Document]:
     """Splits documents into smaller chunks using multiple separators including page breaks."""
@@ -167,7 +180,7 @@ def create_or_load_vector_db(
     if force_reload and documents:
         logging.info("Forcing reload of vector database...")
         if os.path.exists(persist_directory):
-            logging.info(f"Removing existing database at {persist_directory}")
+            logging.warning(f"*** WARNING: Removing existing database directory due to force_reload=True: {persist_directory}")
             shutil.rmtree(persist_directory) # Be careful with this in production!
 
         logging.info("Splitting documents...")
@@ -219,11 +232,30 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
     provider = provider.lower()
     logging.info(f"Using LLM provider: {provider}")
 
+    # Read and validate temperature from environment variable
+    default_temp = 0.7
+    try:
+        temp_str = os.getenv("LLM_TEMPERATURE")
+        if temp_str is None:
+            temperature = default_temp
+            logging.info(f"LLM_TEMPERATURE not set, using default: {temperature}")
+        else:
+            temperature = float(temp_str)
+            # Basic range check, adjust as needed
+            if not (0.0 <= temperature <= 2.0):
+                logging.warning(f"LLM_TEMPERATURE value ({temperature}) out of typical range [0.0, 2.0], using default: {default_temp}")
+                temperature = default_temp
+            else:
+                logging.info(f"Using LLM_TEMPERATURE: {temperature}")
+    except ValueError:
+        logging.warning(f"LLM_TEMPERATURE value ('{temp_str}') is not a valid float, using default: {default_temp}")
+        temperature = default_temp
+
     if provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables.")
-        return OpenAI(api_key=api_key)
+        return OpenAI(api_key=api_key, temperature=temperature)
     elif provider == "ollama":
         ollama_base_url: Optional[str] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         ollama_llm_model: Optional[str] = os.getenv("OLLAMA_LLM_MODEL")
@@ -231,7 +263,7 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             logging.error("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
             raise ValueError("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
         logging.info(f"Using Ollama LLM model: {ollama_llm_model} at {ollama_base_url}")
-        return Ollama(model=ollama_llm_model, base_url=ollama_base_url)
+        return Ollama(model=ollama_llm_model, base_url=ollama_base_url, temperature=temperature)
     elif provider == "azure":
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -245,7 +277,8 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             api_key=azure_api_key,
             azure_endpoint=azure_endpoint,
             api_version=azure_api_version,
-            azure_deployment=azure_llm_deployment
+            azure_deployment=azure_llm_deployment,
+            temperature=temperature
         )
     elif provider == "bedrock":
         model_id = os.getenv("BEDROCK_MODEL_ID")
@@ -267,15 +300,15 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         if credentials_profile_name:
             bedrock_params["credentials_profile_name"] = credentials_profile_name
 
-        # Add model_kwargs if needed, e.g., for temperature:
-        bedrock_params["model_kwargs"] = {"temperature": 0.7}
+        # Pass temperature via model_kwargs for Bedrock
+        bedrock_params["model_kwargs"] = {"temperature": temperature}
 
         return Bedrock(**bedrock_params)
     else:
         logging.error(f"Unsupported LLM provider: {provider}")
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
-# --- QA Chain ---
+# --- QA Chain --- 
 def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> RetrievalQA:
     """Creates the RetrievalQA chain with a specific prompt."""
     template = """Use the following pieces of context to answer the question at the end.
@@ -292,10 +325,23 @@ def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> Retrieval
 
     QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
 
+    # Read k from environment variable, default to 3
+    try:
+        retriever_k_str = os.getenv("RETRIEVER_K", "3")
+        retriever_k = int(retriever_k_str)
+        if retriever_k <= 0:
+            logging.warning(f"RETRIEVER_K value ({retriever_k}) is invalid, defaulting to 3.")
+            retriever_k = 3
+    except ValueError:
+        logging.warning(f"RETRIEVER_K value ('{retriever_k_str}') is not a valid integer, defaulting to 3.")
+        retriever_k = 3
+
+    logging.info(f"Using retriever_k = {retriever_k}")
+
     qa_chain: RetrievalQA = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff", # Loads all relevant chunks into the context window
-        retriever=vector_db.as_retriever(search_kwargs={"k": 3}), # Retrieve top 3 relevant chunks
+        retriever=vector_db.as_retriever(search_kwargs={"k": retriever_k}), # Use configurable k
         return_source_documents=True, # Return the source chunks
         chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
     )

@@ -1,11 +1,15 @@
 import os
 import argparse
+import logging
 from utils import (
     load_documents_from_directory,
     create_or_load_vector_db,
     get_embedding_function,
     DATA_PATH
 )
+
+# Configure logging (optional, if not configured elsewhere)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 if __name__ == "__main__":
     # --- Argument Parsing ---
@@ -18,28 +22,35 @@ if __name__ == "__main__":
     args = parser.parse_args()
     force_reload_db = args.reload
 
-    print("--- Starting Data Loading and Vector DB Creation ---")
+    logging.info("--- Starting Data Loading and Vector DB Creation ---")
     if force_reload_db:
-        print("*** Force Reload Requested ***")
+        logging.info("*** Force Reload Requested ***")
 
     # Ensure the data path exists
     if not os.path.exists(DATA_PATH):
-        print(f"Error: Data directory not found at {DATA_PATH}")
+        logging.error(f"Error: Data directory not found at {DATA_PATH}")
         exit(1)
 
     # 1. Load documents from the specified directory
-    print(f"Loading documents from: {DATA_PATH}")
-    documents = load_documents_from_directory(DATA_PATH)
+    logging.info(f"Loading documents from: {DATA_PATH}")
+    # Unpack the returned tuple
+    documents, failed_files = load_documents_from_directory(DATA_PATH)
+
+    # Log failed files if any
+    if failed_files:
+        logging.warning(f"The following files failed to load and were skipped: {failed_files}")
+
+    # Exit if NO documents were loaded successfully
     if not documents:
-        print("No documents loaded. Exiting.")
+        logging.error("No documents loaded successfully. Exiting.") 
         exit(1)
-    print(f"Total documents loaded: {len(documents)}")
+    logging.info(f"Total documents loaded successfully: {len(documents)}") 
 
     # 2. Get the embedding function (based on .env settings)
     try:
         embedding_func = get_embedding_function()
     except ValueError as e:
-        print(f"Error getting embedding function: {e}")
+        logging.error(f"Error getting embedding function: {e}") 
         exit(1)
 
     # 3. Create/rebuild the vector database
@@ -50,10 +61,11 @@ if __name__ == "__main__":
             force_reload=force_reload_db
         )
         if vector_db:
-            print("--- Vector DB Creation/Update Complete ---")
+            logging.info("--- Vector DB Creation/Update Complete ---")
         else:
-            print("--- Vector DB Creation Failed ---")
+            # This case might happen if splitting results in no texts, handled in create_or_load_vector_db
+            logging.error("--- Vector DB Creation Failed (possibly no text chunks after splitting) ---")
+            exit(1) # Exit if DB creation failed
 
     except Exception as e:
-        print(f"An error occurred during vector DB creation: {e}")
-        exit(1)
+        logging.error(f"An error occurred during vector DB creation: {e}", exc_info=True)
