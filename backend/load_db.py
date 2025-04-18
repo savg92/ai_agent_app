@@ -1,4 +1,5 @@
 import os
+import argparse # Import argparse
 from utils import (
     load_documents_from_directory,
     create_or_load_vector_db,
@@ -7,7 +8,19 @@ from utils import (
 )
 
 if __name__ == "__main__":
+    # --- Argument Parsing ---
+    parser = argparse.ArgumentParser(description="Load data and build/update the vector database.")
+    parser.add_argument(
+        "--reload",
+        action="store_true", # Sets reload_db to True if flag is present
+        help="Force rebuild of the vector database even if it exists."
+    )
+    args = parser.parse_args()
+    force_reload_db = args.reload
+
     print("--- Starting Data Loading and Vector DB Creation ---")
+    if force_reload_db:
+        print("*** Force Reload Requested ***")
 
     # Ensure the data path exists
     if not os.path.exists(DATA_PATH):
@@ -29,12 +42,12 @@ if __name__ == "__main__":
         print(f"Error getting embedding function: {e}")
         exit(1)
 
-    # 3. Create/rebuild the vector database (force_reload=True ensures fresh build)
+    # 3. Create/rebuild the vector database
     try:
         vector_db = create_or_load_vector_db(
             documents=documents,
             embedding_function=embedding_func,
-            force_reload=True # Set to True to always rebuild when this script runs
+            force_reload=force_reload_db # Use the argument value here
         )
         if vector_db:
             print("--- Vector DB Creation/Update Complete ---")
