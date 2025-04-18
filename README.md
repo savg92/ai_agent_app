@@ -33,7 +33,7 @@ This project implements a Retrieval-Augmented Generation (RAG) system using a Py
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/savg92/ai_agent_app
     cd ai_agent_app
     ```
 
