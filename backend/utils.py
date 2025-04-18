@@ -12,6 +12,7 @@ from langchain_community.document_loaders.csv_loader import CSVLoader
 from langchain_core.documents import Document # For type hinting
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+from langchain_core.language_models.llms import BaseLanguageModel # Import BaseLanguageModel
 
 # Load environment variables from .env file
 load_dotenv()
@@ -83,8 +84,10 @@ def load_documents_from_directory(directory_path):
                 loader = UnstructuredFileLoader(file_path)
                 documents.extend(loader.load())
             elif filename.endswith(".json"):
-                # Adjust jq_schema based on your JSON structure if needed
-                loader = JSONLoader(file_path=file_path, jq_schema='.[].content', text_content=False)
+                # Load the entire JSON content as text for broader compatibility.
+                # This might include JSON keys/structure in the loaded document.
+                # For specific structures, you might revert to a targeted jq_schema.
+                loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
                 # Or if the whole object is content: loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
                 loaded_json_docs = loader.load()
                 # Add metadata if desired (e.g., source from the JSON)
@@ -179,7 +182,7 @@ def create_or_load_vector_db(documents=None, embedding_function=None, force_relo
 
 
 # --- LLM Selection ---
-def get_llm(provider=os.getenv("LLM_PROVIDER", "openai")):
+def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguageModel:
     """Selects and initializes the LLM based on the provider."""
     provider = provider.lower()
     print(f"Using LLM provider: {provider}")
@@ -209,13 +212,38 @@ def get_llm(provider=os.getenv("LLM_PROVIDER", "openai")):
             raise ValueError("Missing required Azure OpenAI configuration in environment variables.")
         return AzureOpenAI(
             api_key=azure_api_key,
-            api_base=azure_api_base,
+            azure_endpoint=azure_api_base, # Correct parameter name is azure_endpoint
             api_version=azure_api_version,
-            deployment=azure_deployment_name
+            azure_deployment=azure_deployment_name # Correct parameter name is azure_deployment
         )
     elif provider == "bedrock":
         from langchain_community.llms import Bedrock
-        return Bedrock(...)
+        # Ensure necessary AWS credentials and region are configured in the environment
+        # (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
+        # or via an IAM role or profile.
+        model_id = os.getenv("BEDROCK_MODEL_ID")
+        region_name = os.getenv("AWS_REGION") # Bedrock often requires region
+        credentials_profile_name = os.getenv("BEDROCK_PROFILE_NAME") # Optional: for specific AWS profiles
+
+        if not model_id:
+            raise ValueError("BEDROCK_MODEL_ID not found in environment variables for Bedrock provider.")
+        if not region_name:
+             print("Warning: AWS_REGION not set, Bedrock might default or fail.")
+
+        print(f"Using Bedrock model: {model_id} in region {region_name or 'default'}")
+        bedrock_params = {
+            "model_id": model_id,
+            # client=None, # Let LangChain handle client creation by default
+        }
+        if region_name:
+            bedrock_params["region_name"] = region_name
+        if credentials_profile_name:
+            bedrock_params["credentials_profile_name"] = credentials_profile_name
+
+        # Add model_kwargs if needed, e.g., for temperature:
+        # bedrock_params["model_kwargs"] = {"temperature": 0.7}
+
+        return Bedrock(**bedrock_params)
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
