@@ -48,6 +48,30 @@ This project implements a Retrieval-Augmented Generation (RAG) system using a Py
         python -m venv .venv
         source .venv/bin/activate
         ```
+    *   Using `uv` (recommended):
+        ```bash
+        uv venv .venv
+        source .venv/bin/activate
+        ```
+    *   On macOS/Linux:
+        ```bash
+        source .venv/bin/activate
+        ```
+    *   On Windows:
+        ```bash
+        .venv\Scripts\activate
+        ```
+    *   *Note:* If you encounter issues with `uv`, you can use `pip` to create a virtual environment:
+        ```bash
+        python -m venv .venv
+        source .venv/bin/activate
+        ```
+    *   *Note:* If you are using a different environment manager (like Conda), create and activate your environment accordingly:
+        ```bash
+        conda create -n myenv python=3.9
+        conda activate myenv
+        ```
+
     *   Or using your preferred environment manager (like Conda).
 
 4.  **Install dependencies:**
