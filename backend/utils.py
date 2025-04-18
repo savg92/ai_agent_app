@@ -12,8 +12,7 @@ from langchain_community.embeddings import BedrockEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.document_loaders.csv_loader import CSVLoader
 from langchain_core.documents import Document
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain.chains import ConversationalRetrievalChain # Import ConversationalRetrievalChain
 from langchain_core.language_models.llms import BaseLanguageModel
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
@@ -156,7 +155,8 @@ def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_ove
         length_function=len,
         is_separator_regex=False,
     )
-    logging.info(f"Splitting {len(documents)} documents using separators: {text_splitter.separators}")
+    # Corrected attribute name from .separators to ._separators
+    logging.info(f"Splitting {len(documents)} documents using separators: {text_splitter._separators}")
     split_docs: List[Document] = text_splitter.split_documents(documents)
     logging.info(f"Split into {len(split_docs)} chunks.")
     return split_docs
@@ -308,24 +308,13 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         logging.error(f"Unsupported LLM provider: {provider}")
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
-# --- QA Chain --- 
-def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> RetrievalQA:
-    """Creates the RetrievalQA chain with a specific prompt."""
-    # Updated template to be more directive about using ONLY relevant context
-    template = """Answer the question at the end based *only* on the following relevant context.
-    If the provided context does not contain the answer to the question, just say that you don't know.
-    Do not use any information from the context that is not directly related to the question asked.
-
-    Use three sentences maximum and keep the answer as concise as possible.
-
-    Relevant Context: {context}
-
-    Question: {question}
-
-    Helpful Answer:
-    """
-
-    QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
+# --- QA Chain ---
+def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> ConversationalRetrievalChain:
+    """Creates the ConversationalRetrievalChain."""
+    # Note: The specific prompt for condensing the question is handled internally by the chain,
+    # but you can customize it via the `condense_question_prompt` parameter if needed.
+    # The prompt for combining docs and the standalone question is often less critical here
+    # than in RetrievalQA, but can be customized via `combine_docs_chain_kwargs`.
 
     # Read k from environment variable, default to 3
     try:
@@ -340,16 +329,23 @@ def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> Retrieval
 
     logging.info(f"Using retriever_k = {retriever_k}")
 
-    qa_chain: RetrievalQA = RetrievalQA.from_chain_type(
+    # Create the ConversationalRetrievalChain
+    # It uses one LLM call to condense the history and follow-up question into a standalone question,
+    # then retrieves docs, then uses another LLM call to answer the standalone question using the docs.
+    qa_chain: ConversationalRetrievalChain = ConversationalRetrievalChain.from_llm(
         llm=llm,
-        chain_type="stuff", # Loads all relevant chunks into the context window
-        retriever=vector_db.as_retriever(search_kwargs={"k": retriever_k}), # Use configurable k
-        return_source_documents=True, # Return the source chunks
-        chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
+        retriever=vector_db.as_retriever(search_kwargs={"k": retriever_k}),
+        return_source_documents=True,
+        # You can customize the prompt used to combine documents and the question if needed:
+        # combine_docs_chain_kwargs={"prompt": QA_CHAIN_PROMPT} # QA_CHAIN_PROMPT from previous version could be reused or adapted
     )
     return qa_chain
 
-def answer_question(qa_chain: RetrievalQA, question: str) -> Tuple[str, List[Document]]:
-    """Answers a question using the QA chain."""
-    result: Dict[str, Any] = qa_chain.invoke({"query": question})
-    return result["result"], result["source_documents"]
+def answer_question(qa_chain: ConversationalRetrievalChain, question: str, chat_history: List[Tuple[str, str]]) -> Tuple[str, List[Document]]:
+    """Answers a question using the ConversationalRetrievalChain, considering chat history."""
+    result: Dict[str, Any] = qa_chain.invoke({
+        "question": question,
+        "chat_history": chat_history
+    })
+    # The answer is typically in the 'answer' key for this chain
+    return result["answer"], result["source_documents"]

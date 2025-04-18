@@ -1,15 +1,16 @@
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
 import logging
 import traceback
+import os # Import os
 from contextlib import asynccontextmanager
-from langchain.chains import RetrievalQA
-from langchain_core.vectorstores import VectorStore
-from langchain_core.documents import Document as LangchainDocument
+from typing import List, Optional, Dict, Any, Tuple # Ensure Tuple is imported
+
 from dotenv import load_dotenv
-import os
+from langchain.chains import ConversationalRetrievalChain # Ensure this is imported
+from langchain_core.documents import Document as LangchainDocument # Add this import
+from langchain_core.vectorstores import VectorStore # Add this import
+from pydantic import BaseModel # Add this import
+from fastapi import FastAPI, HTTPException, Depends # Add these imports
+from fastapi.middleware.cors import CORSMiddleware # Add this import
 
 # Import utility functions and types
 from utils import (
@@ -18,16 +19,20 @@ from utils import (
     create_qa_chain,
     answer_question,
     create_or_load_vector_db,
-    load_documents_from_directory,
-    DATA_PATH,
+    load_documents_from_directory, # Import document loading function
+    DATA_PATH, # Import data path
     CHROMA_DB_DIRECTORY
 )
 
 
 # --- Global Variables / State (Typed) ---
-# These will be initialized via the lifespan manager
 vector_db: Optional[VectorStore] = None
-qa_chain: Optional[RetrievalQA] = None
+qa_chain: Optional[ConversationalRetrievalChain] = None
+# In-memory storage for chat histories {session_id: chat_history}
+# WARNING: This is volatile and not suitable for production (lost on restart, not scalable).
+# Consider using Redis, a database, or another persistent store for production.
+chat_histories: Dict[str, List[Tuple[str, str]]] = {}
+
 
 # --- Lifespan Context Manager ---
 @asynccontextmanager
@@ -131,59 +136,90 @@ app.add_middleware(
 # --- Pydantic Models ---
 class AskRequest(BaseModel):
     question: str
+    session_id: str # Require a session_id from the client
+
 
 class SourceDocument(BaseModel):
     page_content: str
     metadata: Dict[str, Any]
 
+
 class AskResponse(BaseModel):
     answer: str
     sources: List[SourceDocument]
+    session_id: str # Return session_id to confirm
 
 
 # --- Dependency for QA Chain ---
-# This dependency now just checks if the chain is ready
-async def get_initialized_qa_chain() -> RetrievalQA:
+async def get_initialized_qa_chain() -> ConversationalRetrievalChain: # Update return type hint
     if qa_chain is None:
         logging.error("QA chain accessed before initialization or initialization failed.")
         raise HTTPException(status_code=503, detail="Service Unavailable: QA Chain not ready.")
-    # Note: This simple global approach isn't ideal for dynamic provider switching per request
-    # without re-initializing, which can be slow. Consider caching chains per provider if needed.
     return qa_chain
 
 # --- API Endpoints ---
 @app.post("/ask", response_model=AskResponse)
 async def ask_question_endpoint(
     request: AskRequest,
-    current_qa_chain: RetrievalQA = Depends(get_initialized_qa_chain) # Inject the initialized chain
-    ) -> AskResponse:
+    current_qa_chain: ConversationalRetrievalChain = Depends(get_initialized_qa_chain)
+) -> AskResponse:
     """
-    Receives a question, retrieves relevant context, and generates an answer using an LLM.
+    Receives a question and session_id, retrieves relevant context and chat history,
+    generates an answer using an LLM with conversational memory, and updates the history.
+
+    Args:
+        request (AskRequest): The request body containing:
+            - question (str): The user's question.
+            - session_id (str): A unique identifier for the conversation session.
+              The backend uses this ID to retrieve and store the chat history.
+              The client must generate and manage this ID.
+        current_qa_chain (ConversationalRetrievalChain): The initialized QA chain (injected dependency).
+
+    Returns:
+        AskResponse: The response containing the generated answer, source documents,
+                     and the session_id used.
+
+    Raises:
+        HTTPException: If the question or session_id is empty (400),
+                       if the QA chain is not ready (503),
+                       or if an internal error occurs (500).
     """
-    logging.info(f"Received question: {request.question}")
+    logging.info(f"Received question: {request.question} for session: {request.session_id}")
     if not request.question:
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    if not request.session_id:
+         raise HTTPException(status_code=400, detail="Session ID cannot be empty.")
+
+    # Retrieve chat history for the session, default to empty list if new session
+    # Type hint for clarity
+    chat_history: List[Tuple[str, str]] = chat_histories.get(request.session_id, [])
+    logging.info(f"Retrieved chat history length for session {request.session_id}: {len(chat_history)}")
 
     try:
-        # The endpoint now always uses the globally initialized current_qa_chain
-
         answer_str: str
         source_docs: List[LangchainDocument]
-        answer_str, source_docs = answer_question(current_qa_chain, request.question)
+        # Pass retrieved chat_history to answer_question
+        answer_str, source_docs = answer_question(current_qa_chain, request.question, chat_history)
+
+        # Update the chat history for this session
+        # Use setdefault to ensure the key exists before appending
+        chat_histories.setdefault(request.session_id, []).append((request.question, answer_str))
+        logging.info(f"Updated chat history length for session {request.session_id}: {len(chat_histories[request.session_id])}")
+
 
         # Convert source documents to Pydantic model
         response_sources: List[SourceDocument] = [
             SourceDocument(page_content=doc.page_content, metadata=doc.metadata) for doc in source_docs
         ]
 
-        logging.info(f"Generated answer: {answer_str[:100]}...") # Log snippet
-        return AskResponse(answer=answer_str, sources=response_sources)
+        logging.info(f"Generated answer for session {request.session_id}: {answer_str[:100]}...")
+        return AskResponse(answer=answer_str, sources=response_sources, session_id=request.session_id)
 
     except ValueError as e:
-        logging.error(f"Value Error during question answering: {e}")
+        logging.error(f"Value Error during question answering for session {request.session_id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logging.error(f"Error during question answering: {e}")
+        logging.error(f"Error during question answering for session {request.session_id}: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 

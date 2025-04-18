@@ -69,3 +69,4 @@ if __name__ == "__main__":
 
     except Exception as e:
         logging.error(f"An error occurred during vector DB creation: {e}", exc_info=True)
+        exit(1) # Exit if a critical error occurs during DB creation
