@@ -311,12 +311,14 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
 # --- QA Chain --- 
 def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> RetrievalQA:
     """Creates the RetrievalQA chain with a specific prompt."""
-    template = """Use the following pieces of context to answer the question at the end.
-    If you don't know the answer, just say that you don't know, don't try to make up an answer.
-    Use three sentences maximum and keep the answer as concise as possible.
-    Always say "thanks for asking!" at the end of the answer.
+    # Updated template to be more directive about using ONLY relevant context
+    template = """Answer the question at the end based *only* on the following relevant context.
+    If the provided context does not contain the answer to the question, just say that you don't know.
+    Do not use any information from the context that is not directly related to the question asked.
 
-    Context: {context}
+    Use three sentences maximum and keep the answer as concise as possible.
+
+    Relevant Context: {context}
 
     Question: {question}
 

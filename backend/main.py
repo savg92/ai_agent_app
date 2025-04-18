@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from langchain.chains import RetrievalQA
 from langchain_core.vectorstores import VectorStore
 from langchain_core.documents import Document as LangchainDocument
+from dotenv import load_dotenv
+import os
 
 # Import utility functions and types
 from utils import (
@@ -16,6 +18,8 @@ from utils import (
     create_qa_chain,
     answer_question,
     create_or_load_vector_db,
+    load_documents_from_directory,
+    DATA_PATH,
     CHROMA_DB_DIRECTORY
 )
 
@@ -28,6 +32,7 @@ qa_chain: Optional[RetrievalQA] = None
 # --- Lifespan Context Manager ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_dotenv()
     # Startup logic: Load the model and initialize the QA chain
     global vector_db, qa_chain
     logging.info("Application startup: Initializing QA chain...")
@@ -35,21 +40,63 @@ async def lifespan(app: FastAPI):
         # Initialize using default providers from environment for startup
         embedding_func = get_embedding_function()
         llm = get_llm()
+
+        logging.info(f"Attempting to load vector database from: {CHROMA_DB_DIRECTORY}")
+        # Try to load existing DB first
         vector_db = create_or_load_vector_db(embedding_function=embedding_func, force_reload=False)
+
+        # If DB doesn't exist, create it
         if vector_db is None:
-            logging.error("Startup failed: Vector database could not be loaded. Run load_db.py first.")
-            raise RuntimeError("Vector database could not be loaded.")
-        else:
-            qa_chain = create_qa_chain(vector_db, llm)
-            logging.info("QA Chain initialized successfully.")
+            logging.warning(f"Vector database not found at {CHROMA_DB_DIRECTORY}. Attempting to create it...")
+            # Ensure the data path exists before trying to load
+            if not os.path.exists(DATA_PATH):
+                 logging.error(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
+                 raise RuntimeError(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
+
+            logging.info(f"Loading documents from: {DATA_PATH}")
+            documents: List[LangchainDocument]
+            failed_files: List[str]
+            documents, failed_files = load_documents_from_directory(DATA_PATH)
+
+            if failed_files:
+                logging.warning(f"The following files failed to load during DB creation: {failed_files}")
+
+            if not documents:
+                logging.error("No documents loaded successfully. Cannot create vector database.")
+                raise RuntimeError("No documents loaded successfully. Cannot create vector database.")
+
+            logging.info(f"Creating new vector database with {len(documents)} documents...")
+            # Call create_or_load_vector_db again, this time with documents to trigger creation
+            vector_db = create_or_load_vector_db(
+                documents=documents,
+                embedding_function=embedding_func,
+                force_reload=False # False is correct, it will create if not existing
+            )
+
+            if vector_db is None:
+                # This might happen if splitting documents resulted in nothing, or another error occurred
+                logging.error("Failed to create vector database even after loading documents.")
+                raise RuntimeError("Failed to create vector database.")
+            else:
+                 logging.info("Vector database created successfully.")
+
+        # If we have a vector_db (either loaded or created), create the QA chain
+        qa_chain = create_qa_chain(vector_db, llm)
+        logging.info("QA Chain initialized successfully.")
 
     except ValueError as e:
-        logging.error(f"Startup failed due to Configuration Error: {e}")
+        # Configuration errors (e.g., missing API keys, invalid model names)
+        logging.error(f"Startup failed due to Configuration Error: {e}", exc_info=True)
+        # Re-raise or handle specific config errors if needed
+        raise RuntimeError(f"Application startup failed due to Configuration Error: {e}")
     except Exception as e:
-        logging.error(f"Startup failed due to Initialization Error: {e}")
-        raise RuntimeError("Application startup failed due to Initialization Error.")
+        # Catch other potential errors during initialization (network, file access, etc.)
+        logging.error(f"Startup failed due to Initialization Error: {e}", exc_info=True)
+        # It's often useful to re-raise the original exception or a more specific one
+        # For simplicity here, we wrap it in a RuntimeError
+        raise RuntimeError(f"Application startup failed due to Initialization Error: {e}")
 
-    yield 
+    yield
 
     # Shutdown logic (if any)
     logging.info("Application shutdown.")

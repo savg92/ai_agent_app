@@ -16,6 +16,7 @@ ENV/
 
 # Environment variables
 backend/.env
+backend/chroma_db_store/
 frontend/.env
 
 # VSCode settings
