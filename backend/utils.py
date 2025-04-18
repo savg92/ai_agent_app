@@ -20,7 +20,7 @@ from langchain_community.llms import Bedrock
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import OpenAI
 from langchain_community.llms import Ollama
-from langchain_openai import AzureOpenAI
+from langchain_openai import AzureOpenAI, AzureChatOpenAI
 import pathlib
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -73,6 +73,9 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         model_id: Optional[str] = os.getenv("BEDROCK_EMBEDDING_MODEL_ID")
         region_name: Optional[str] = os.getenv("AWS_REGION")
         credentials_profile_name: Optional[str] = os.getenv("BEDROCK_PROFILE_NAME")
+        aws_access_key_id: Optional[str] = os.getenv("AWS_ACCESS_KEY_ID")
+        aws_secret_access_key: Optional[str] = os.getenv("AWS_SECRET_ACCESS_KEY")
+
         if not model_id:
             logging.error("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
             raise ValueError("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
@@ -86,7 +89,13 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         if region_name:
             bedrock_params["region_name"] = region_name
         if credentials_profile_name:
+            if aws_access_key_id or aws_secret_access_key:
+                logging.warning("Both BEDROCK_PROFILE_NAME and AWS access keys found in environment. Using profile name.")
             bedrock_params["credentials_profile_name"] = credentials_profile_name
+        elif aws_access_key_id and aws_secret_access_key:
+            logging.info("Using AWS Access Key ID and Secret Access Key for Bedrock authentication.")
+            bedrock_params["aws_access_key_id"] = aws_access_key_id
+            bedrock_params["aws_secret_access_key"] = aws_secret_access_key
 
         return BedrockEmbeddings(**bedrock_params)
 
@@ -244,7 +253,7 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             logging.error("Missing required Azure OpenAI configuration (Key, Endpoint, Version, LLM Deployment Name) in environment variables.")
             raise ValueError("Missing required Azure OpenAI configuration (Key, Endpoint, Version, LLM Deployment Name) in environment variables.")
         logging.info(f"Using Azure LLM deployment: {azure_llm_deployment}")
-        return AzureOpenAI(
+        return AzureChatOpenAI(
             api_key=azure_api_key,
             azure_endpoint=azure_endpoint,
             api_version=azure_api_version,
@@ -255,6 +264,8 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         model_id = os.getenv("BEDROCK_MODEL_ID")
         region_name = os.getenv("AWS_REGION")
         credentials_profile_name = os.getenv("BEDROCK_PROFILE_NAME")
+        aws_access_key_id: Optional[str] = os.getenv("AWS_ACCESS_KEY_ID")
+        aws_secret_access_key: Optional[str] = os.getenv("AWS_SECRET_ACCESS_KEY")
 
         if not model_id:
             logging.error("BEDROCK_MODEL_ID not found in environment variables for Bedrock provider.")
@@ -269,7 +280,13 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         if region_name:
             bedrock_params["region_name"] = region_name
         if credentials_profile_name:
+            if aws_access_key_id or aws_secret_access_key:
+                logging.warning("Both BEDROCK_PROFILE_NAME and AWS access keys found in environment. Using profile name.")
             bedrock_params["credentials_profile_name"] = credentials_profile_name
+        elif aws_access_key_id and aws_secret_access_key:
+            logging.info("Using AWS Access Key ID and Secret Access Key for Bedrock authentication.")
+            bedrock_params["aws_access_key_id"] = aws_access_key_id
+            bedrock_params["aws_secret_access_key"] = aws_secret_access_key
 
         bedrock_params["model_kwargs"] = {"temperature": temperature}
 
