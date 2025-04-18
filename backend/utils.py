@@ -1,22 +1,22 @@
 import os
-import logging # Import logging
+import logging
 from typing import Optional, Dict, Any, List, Tuple
 from dotenv import load_dotenv
 import shutil
 from langchain_community.document_loaders import UnstructuredFileLoader, JSONLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter # Changed import
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import OllamaEmbeddings # Or HuggingFaceEmbeddings
-from langchain_community.embeddings import BedrockEmbeddings # Uncomment if using Bedrock
-from langchain_openai import AzureOpenAIEmbeddings  # Correct import for Azure embeddings
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.embeddings import BedrockEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.document_loaders.csv_loader import CSVLoader
-from langchain_core.documents import Document # For type hinting
+from langchain_core.documents import Document
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain_core.language_models.llms import BaseLanguageModel # Import BaseLanguageModel
-from langchain_core.embeddings import Embeddings # Import Embeddings
-from langchain_core.vectorstores import VectorStore # Import VectorStore
+from langchain_core.language_models.llms import BaseLanguageModel
+from langchain_core.embeddings import Embeddings
+from langchain_core.vectorstores import VectorStore
 from langchain_community.llms import Bedrock
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import OpenAI
@@ -30,8 +30,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 load_dotenv()
 
 # --- Configuration ---
-CHROMA_DB_DIRECTORY = "chroma_db_store" # Persistent storage directory
-DATA_PATH = "../data" # Relative path to the data directory
+CHROMA_DB_DIRECTORY = "chroma_db_store"
+DATA_PATH = "../data"
 
 # --- Embedding Model Selection ---
 def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "openai")) -> Embeddings:
@@ -44,22 +44,22 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         if not api_key:
             raise ValueError("OPENAI_API_KEY not found in environment variables.")
         return OpenAIEmbeddings(api_key=api_key)
-    
+
     elif provider == "ollama":
         ollama_base_url: Optional[str] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        ollama_embedding_model: Optional[str] = os.getenv("OLLAMA_EMBEDDING_MODEL") # Use specific embedding model variable
+        ollama_embedding_model: Optional[str] = os.getenv("OLLAMA_EMBEDDING_MODEL")
         if not ollama_embedding_model:
-            logging.error("OLLAMA_EMBEDDING_MODEL not found in environment variables for Ollama embedding provider.") 
+            logging.error("OLLAMA_EMBEDDING_MODEL not found in environment variables for Ollama embedding provider.")
             raise ValueError("OLLAMA_EMBEDDING_MODEL not found in environment variables for Ollama embedding provider.")
         # Ensure ollama server is running if using this
         logging.info(f"Using Ollama embedding model: {ollama_embedding_model} at {ollama_base_url}")
         return OllamaEmbeddings(model=ollama_embedding_model, base_url=ollama_base_url)
-    
+
     elif provider == "azure":
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") # Use ENDPOINT consistently
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-        azure_embedding_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME") # Specific for embeddings
+        azure_embedding_deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
         if not all([azure_api_key, azure_endpoint, azure_api_version, azure_embedding_deployment]):
             logging.error("Missing required Azure OpenAI configuration (Key, Endpoint, Version, Embedding Deployment Name) in environment variables.")
             raise ValueError("Missing required Azure OpenAI configuration (Key, Endpoint, Version, Embedding Deployment Name) in environment variables.")
@@ -68,17 +68,14 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
             api_key=azure_api_key,
             azure_endpoint=azure_endpoint,
             api_version=azure_api_version,
-            azure_deployment=azure_embedding_deployment # Use specific deployment
+            azure_deployment=azure_embedding_deployment
         )
-    
-    elif provider == "bedrock":
-        # Ensure necessary AWS credentials and region are configured in the environment
-        # (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
-        # or via an IAM role or profile.
-        model_id: Optional[str] = os.getenv("BEDROCK_EMBEDDING_MODEL_ID")
-        region_name: Optional[str] = os.getenv("AWS_REGION") # Bedrock often requires region
-        credentials_profile_name: Optional[str] = os.getenv("BEDROCK_PROFILE_NAME") # Optional: for specific AWS profiles
 
+    elif provider == "bedrock":
+
+        model_id: Optional[str] = os.getenv("BEDROCK_EMBEDDING_MODEL_ID")
+        region_name: Optional[str] = os.getenv("AWS_REGION")
+        credentials_profile_name: Optional[str] = os.getenv("BEDROCK_PROFILE_NAME")
         if not model_id:
             logging.error("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
             raise ValueError("BEDROCK_EMBEDDING_MODEL_ID not found in environment variables for Bedrock embedding provider.")
@@ -88,7 +85,6 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         logging.info(f"Using Bedrock embedding model: {model_id} in region {region_name or 'default'}")
         bedrock_params: Dict[str, Any] = {
             "model_id": model_id,
-            # client=None, # Let LangChain handle client creation by default
         }
         if region_name:
             bedrock_params["region_name"] = region_name
@@ -96,7 +92,7 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
             bedrock_params["credentials_profile_name"] = credentials_profile_name
 
         return BedrockEmbeddings(**bedrock_params)
-    
+
     else:
         # Default or fallback: Using Sentence Transformers (works well locally)
         logging.info("Provider not explicitly supported or specified, defaulting to Sentence Transformers (all-MiniLM-L6-v2).")
@@ -122,23 +118,20 @@ def load_documents_from_directory(directory_path: str) -> List[Document]:
                 # This might include JSON keys/structure in the loaded document.
                 # For specific structures, you might revert to a targeted jq_schema.
                 loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
-                # Or if the whole object is content: loader = JSONLoader(file_path=file_path, jq_schema='.', text_content=True)
                 loaded_json_docs = loader.load()
-                # Add metadata if desired (e.g., source from the JSON)
-                # For simplicity here, we just load the content.
                 documents.extend(loaded_json_docs)
             elif filename.endswith(".csv"):
                 loader = CSVLoader(file_path=file_path)
                 documents.extend(loader.load())
 
-            logging.debug(f"Loaded documents from: {filename}") # Use debug for per-file success
+            logging.debug(f"Loaded documents from: {filename}")
         except Exception as e:
-            logging.error(f"Error loading {filename}: {e}", exc_info=True) # Log exception info
+            logging.error(f"Error loading {filename}: {e}", exc_info=True)
 
     logging.info(f"Finished loading documents. Total loaded: {len(documents)}")
     return documents
 
-def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 100) -> List[Document]: # Added type hints
+def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_overlap: int = 100) -> List[Document]:
     """Splits documents into smaller chunks using multiple separators including page breaks."""
     # Using RecursiveCharacterTextSplitter for multiple separators.
     # It tries separators in order: page break, double newline, single newline, space, then characters.
@@ -157,8 +150,8 @@ def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_ove
 
 # --- Vector Database Operations ---
 def create_or_load_vector_db(
-    documents: Optional[List[Document]] = None, 
-    embedding_function: Optional[Embeddings] = None, 
+    documents: Optional[List[Document]] = None,
+    embedding_function: Optional[Embeddings] = None,
     force_reload: bool = False
 ) -> Optional[VectorStore]:
     """
@@ -169,7 +162,7 @@ def create_or_load_vector_db(
         embedding_function = get_embedding_function()
 
     persist_directory: str = CHROMA_DB_DIRECTORY
-    vector_db: Optional[VectorStore] = None # Initialize vector_db
+    vector_db: Optional[VectorStore] = None
 
     if force_reload and documents:
         logging.info("Forcing reload of vector database...")
@@ -233,47 +226,41 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         return OpenAI(api_key=api_key)
     elif provider == "ollama":
         ollama_base_url: Optional[str] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        ollama_llm_model: Optional[str] = os.getenv("OLLAMA_LLM_MODEL") # Use specific LLM model variable
+        ollama_llm_model: Optional[str] = os.getenv("OLLAMA_LLM_MODEL")
         if not ollama_llm_model:
             logging.error("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
             raise ValueError("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
         logging.info(f"Using Ollama LLM model: {ollama_llm_model} at {ollama_base_url}")
         return Ollama(model=ollama_llm_model, base_url=ollama_base_url)
-    # Add other providers:
     elif provider == "azure":
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT") # Use ENDPOINT consistently
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-        azure_llm_deployment = os.getenv("AZURE_OPENAI_LLM_DEPLOYMENT_NAME") # Specific for LLM
+        azure_llm_deployment = os.getenv("AZURE_OPENAI_LLM_DEPLOYMENT_NAME")
         if not all([azure_api_key, azure_endpoint, azure_api_version, azure_llm_deployment]):
             logging.error("Missing required Azure OpenAI configuration (Key, Endpoint, Version, LLM Deployment Name) in environment variables.")
             raise ValueError("Missing required Azure OpenAI configuration (Key, Endpoint, Version, LLM Deployment Name) in environment variables.")
         logging.info(f"Using Azure LLM deployment: {azure_llm_deployment}")
         return AzureOpenAI(
             api_key=azure_api_key,
-            azure_endpoint=azure_endpoint, 
+            azure_endpoint=azure_endpoint,
             api_version=azure_api_version,
-            azure_deployment=azure_llm_deployment # Use specific deployment
+            azure_deployment=azure_llm_deployment
         )
     elif provider == "bedrock":
-        
-        # Ensure necessary AWS credentials and region are configured in the environment
-        # (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
-        # or via an IAM role or profile.
         model_id = os.getenv("BEDROCK_MODEL_ID")
-        region_name = os.getenv("AWS_REGION") # Bedrock often requires region
-        credentials_profile_name = os.getenv("BEDROCK_PROFILE_NAME") # Optional: for specific AWS profiles
+        region_name = os.getenv("AWS_REGION")
+        credentials_profile_name = os.getenv("BEDROCK_PROFILE_NAME")
 
         if not model_id:
             logging.error("BEDROCK_MODEL_ID not found in environment variables for Bedrock provider.")
             raise ValueError("BEDROCK_MODEL_ID not found in environment variables for Bedrock provider.")
         if not region_name:
-             logging.warning("AWS_REGION not set, Bedrock might default or fail.")
+             logging.warning("AWS_REGION not set for Bedrock LLM, it might default or fail.")
 
         logging.info(f"Using Bedrock model: {model_id} in region {region_name or 'default'}")
         bedrock_params: Dict[str, Any] = {
             "model_id": model_id,
-            # client=None, # Let LangChain handle client creation by default
         }
         if region_name:
             bedrock_params["region_name"] = region_name
@@ -281,7 +268,7 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             bedrock_params["credentials_profile_name"] = credentials_profile_name
 
         # Add model_kwargs if needed, e.g., for temperature:
-        # bedrock_params["model_kwargs"] = {"temperature": 0.7}
+        bedrock_params["model_kwargs"] = {"temperature": 0.7}
 
         return Bedrock(**bedrock_params)
     else:
@@ -291,24 +278,18 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
 # --- QA Chain ---
 def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> RetrievalQA:
     """Creates the RetrievalQA chain with a specific prompt."""
-    # No null check needed due to type hint
-    # if not vector_db:
-    #      raise ValueError("Vector database is not initialized.")
+    template = """Use the following pieces of context to answer the question at the end.
+    If you don't know the answer, just say that you don't know, don't try to make up an answer.
+    Use three sentences maximum and keep the answer as concise as possible.
+    Always say "thanks for asking!" at the end of the answer.
 
-    template = """
-        Answer the following question based only on the provided context.
-        If the context does not contain the answer, state that you cannot answer based on the provided context.
+    Context: {context}
 
-        Context:
-        {context}
+    Question: {question}
 
-        Question:
-        {question}
+    Helpful Answer:
+    """
 
-        Answer:
-        """
-    
-    # Adjust the prompt template as needed
     QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
 
     qa_chain: RetrievalQA = RetrievalQA.from_chain_type(
@@ -322,8 +303,5 @@ def create_qa_chain(vector_db: VectorStore, llm: BaseLanguageModel) -> Retrieval
 
 def answer_question(qa_chain: RetrievalQA, question: str) -> Tuple[str, List[Document]]:
     """Answers a question using the QA chain."""
-    # No null check needed due to type hint
-    # if not qa_chain:
-    #      raise ValueError("QA chain is not initialized.")
-    result: Dict[str, Any] = qa_chain.invoke({"query": question}) # Use invoke for newer Langchain versions
+    result: Dict[str, Any] = qa_chain.invoke({"query": question})
     return result["result"], result["source_documents"]

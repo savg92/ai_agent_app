@@ -1,5 +1,5 @@
 import os
-import argparse # Import argparse
+import argparse
 from utils import (
     load_documents_from_directory,
     create_or_load_vector_db,
@@ -47,7 +47,7 @@ if __name__ == "__main__":
         vector_db = create_or_load_vector_db(
             documents=documents,
             embedding_function=embedding_func,
-            force_reload=force_reload_db # Use the argument value here
+            force_reload=force_reload_db
         )
         if vector_db:
             print("--- Vector DB Creation/Update Complete ---")
