@@ -18,14 +18,72 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from langchain_community.llms import Bedrock
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_openai import OpenAI
+from langchain_openai import OpenAI, ChatOpenAI
 from langchain_community.llms import Ollama
 from langchain_openai import AzureOpenAI, AzureChatOpenAI
 import pathlib
+import requests
+import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 load_dotenv()
+
+
+class LMStudioEmbeddings(Embeddings):
+    """Custom embedding class for LM Studio that handles the API format correctly."""
+    
+    def __init__(self, base_url: str, model: str, api_key: str = "lm-studio"):
+        self.base_url = base_url.rstrip('/') + '/v1'
+        self.model = model
+        self.api_key = api_key
+    
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed a list of documents."""
+        embeddings = []
+        for text in texts:
+            embedding = self._get_embedding(text)
+            embeddings.append(embedding)
+        return embeddings
+    
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a single query text."""
+        return self._get_embedding(text)
+    
+    def _get_embedding(self, text: str) -> List[float]:
+        """Get embedding for a single text using LM Studio API."""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        payload = {
+            "input": text,  # LM Studio expects 'input' as a string
+            "model": self.model
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/embeddings",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            if 'data' in result and len(result['data']) > 0:
+                return result['data'][0]['embedding']
+            else:
+                raise ValueError(f"Unexpected response format from LM Studio: {result}")
+                
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error calling LM Studio embedding API: {e}")
+            raise ValueError(f"Failed to get embedding from LM Studio: {e}")
+        except (KeyError, IndexError) as e:
+            logging.error(f"Error parsing LM Studio response: {e}")
+            raise ValueError(f"Invalid response format from LM Studio: {e}")
 
 
 BACKEND_DIR = pathlib.Path(__file__).parent.resolve()
@@ -98,6 +156,22 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
             bedrock_params["aws_secret_access_key"] = aws_secret_access_key
 
         return BedrockEmbeddings(**bedrock_params)
+
+    elif provider == "lmstudio":
+        lm_studio_base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+        lm_studio_api_key = os.getenv("LM_STUDIO_API_KEY", "lm-studio")  # LM Studio uses a dummy key
+        lm_studio_embedding_model = os.getenv("LM_STUDIO_EMBEDDING_MODEL")
+        
+        if not lm_studio_embedding_model:
+            logging.error("LM_STUDIO_EMBEDDING_MODEL not found in environment variables for LM Studio embedding provider.")
+            raise ValueError("LM_STUDIO_EMBEDDING_MODEL not found in environment variables for LM Studio embedding provider.")
+        
+        logging.info(f"Using LM Studio embedding model: {lm_studio_embedding_model} at {lm_studio_base_url}")
+        return LMStudioEmbeddings(
+            base_url=lm_studio_base_url,
+            model=lm_studio_embedding_model,
+            api_key=lm_studio_api_key
+        )
 
     else:
         logging.info("Provider not explicitly supported or specified, defaulting to Sentence Transformers (all-MiniLM-L6-v2).")
@@ -291,6 +365,22 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
         bedrock_params["model_kwargs"] = {"temperature": temperature}
 
         return Bedrock(**bedrock_params)
+    elif provider == "lmstudio":
+        lm_studio_base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+        lm_studio_api_key = os.getenv("LM_STUDIO_API_KEY", "lm-studio")  # LM Studio uses a dummy key
+        lm_studio_model = os.getenv("LM_STUDIO_MODEL")
+        
+        if not lm_studio_model:
+            logging.error("LM_STUDIO_MODEL not found in environment variables for LM Studio provider.")
+            raise ValueError("LM_STUDIO_MODEL not found in environment variables for LM Studio provider.")
+        
+        logging.info(f"Using LM Studio model: {lm_studio_model} at {lm_studio_base_url}")
+        return ChatOpenAI(
+            api_key=lm_studio_api_key,
+            base_url=f"{lm_studio_base_url}/v1",
+            model=lm_studio_model,
+            temperature=temperature
+        )
     else:
         logging.error(f"Unsupported LLM provider: {provider}")
         raise ValueError(f"Unsupported LLM provider: {provider}")

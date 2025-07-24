@@ -1,13 +1,13 @@
 # AI Agent RAG Application
 
-This project implements a Retrieval-Augmented Generation (RAG) system using a Python backend built with FastAPI and Langchain. It allows users to ask questions about documents stored locally, leveraging various LLM and embedding providers like Ollama, OpenAI, Azure, and Bedrock.
+This project implements a Retrieval-Augmented Generation (RAG) system using a Python backend built with FastAPI and Langchain. It allows users to ask questions about documents stored locally, leveraging various LLM and embedding providers like Ollama, OpenAI, Azure, Bedrock, and LM Studio.
 
 ## Features
 
 *   **RAG Pipeline:** Retrieves relevant document chunks from a vector database (ChromaDB) and uses a Language Model (LLM) to generate answers based on the retrieved context.
 *   **Conversational Memory:** Maintains chat history per session, allowing for follow-up questions.
 *   **FastAPI Backend:** Provides an API endpoint (`/ask`) to interact with the RAG system.
-*   **Multiple Provider Support:** Configurable to use different providers for embeddings (OpenAI, Ollama, Azure, Bedrock, HuggingFace) and LLMs (OpenAI, Ollama, Azure, Bedrock) via environment variables.
+*   **Multiple Provider Support:** Configurable to use different providers for embeddings (OpenAI, Ollama, Azure, Bedrock, HuggingFace, LM Studio) and LLMs (OpenAI, Ollama, Azure, Bedrock, LM Studio) via environment variables.
 *   **Automatic Database Creation:** The backend automatically creates the vector database on first startup if it doesn't exist.
 *   **CORS Enabled:** Allows requests from specified frontend origins (e.g., `http://localhost:3000`, `http://localhost:5173`).
 
@@ -156,6 +156,7 @@ curl -X 'POST' \\
 *   [Uvicorn](https://www.uvicorn.org/)
 *   [ChromaDB](https://www.trychroma.com/)
 *   [Ollama](https://ollama.com/)
+*   [LM Studio](https://lmstudio.ai/)
 *   [OpenAI](https://openai.com/)
 *   [Azure AI Services](https://azure.microsoft.com/en-us/products/ai-services/)
 *   [AWS Bedrock](https://aws.amazon.com/bedrock/)
