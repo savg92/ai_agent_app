@@ -39,7 +39,38 @@ async def lifespan(app: FastAPI):
         llm = get_llm()
 
         logging.info(f"Attempting to load vector database from: {CHROMA_DB_DIRECTORY}")
-        vector_db = create_or_load_vector_db(embedding_function=embedding_func, force_reload=False)
+        
+        # Check if embedding config has changed and we need to rebuild
+        from utils import has_embedding_config_changed
+        config_changed = has_embedding_config_changed()
+        
+        if config_changed and os.path.exists(CHROMA_DB_DIRECTORY):
+            logging.warning("Embedding configuration has changed. Loading documents to rebuild vector database...")
+            if not os.path.exists(DATA_PATH):
+                logging.error(f"Data directory not found at {DATA_PATH}. Cannot rebuild vector database.")
+                raise RuntimeError(f"Data directory not found at {DATA_PATH}. Cannot rebuild vector database.")
+            
+            logging.info(f"Loading documents from: {DATA_PATH}")
+            documents: List[LangchainDocument]
+            failed_files: List[str]
+            documents, failed_files = load_documents_from_directory(DATA_PATH)
+
+            if failed_files:
+                logging.warning(f"The following files failed to load during DB rebuild: {failed_files}")
+
+            if not documents:
+                logging.error("No documents loaded successfully. Cannot rebuild vector database.")
+                raise RuntimeError("No documents loaded successfully. Cannot rebuild vector database.")
+
+            logging.info(f"Rebuilding vector database with {len(documents)} documents due to config change...")
+            vector_db = create_or_load_vector_db(
+                documents=documents,
+                embedding_function=embedding_func,
+                force_reload=True  # Force rebuild due to config change
+            )
+        else:
+            # Try to load existing vector database
+            vector_db = create_or_load_vector_db(embedding_function=embedding_func, force_reload=False)
 
         if vector_db is None:
             logging.warning(f"Vector database not found at {CHROMA_DB_DIRECTORY}. Attempting to create it...")

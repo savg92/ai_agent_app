@@ -31,8 +31,6 @@ load_dotenv()
 
 # Disable Chroma telemetry
 os.environ['ANONYMIZED_TELEMETRY'] = 'False'
-
-
 class LMStudioEmbeddings(Embeddings):
     """Custom embedding class for LM Studio that handles the API format correctly."""
     
@@ -332,7 +330,6 @@ def create_or_load_vector_db(
             embedding=embedding_function,
             persist_directory=persist_directory
         )
-        vector_db.persist()
         logging.info(f"Vector database created and persisted at {persist_directory}")
         
         # Save the current embedding config after successful database creation
@@ -376,7 +373,6 @@ def create_or_load_vector_db(
             embedding=embedding_function,
             persist_directory=persist_directory
          )
-         vector_db.persist()
          logging.info(f"Vector database created and persisted at {persist_directory}")
          
          # Save the current embedding config after successful database creation
