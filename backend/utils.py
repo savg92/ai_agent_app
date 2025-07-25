@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 import shutil
 from langchain_community.document_loaders import UnstructuredFileLoader, JSONLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_community.embeddings import BedrockEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.document_loaders.csv_loader import CSVLoader
@@ -19,7 +19,7 @@ from langchain_core.vectorstores import VectorStore
 from langchain_community.llms import Bedrock
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import OpenAI, ChatOpenAI
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_openai import AzureOpenAI, AzureChatOpenAI
 import pathlib
 import requests
@@ -28,6 +28,9 @@ import json
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 load_dotenv()
+
+# Disable Chroma telemetry
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
 
 
 class LMStudioEmbeddings(Embeddings):
@@ -90,6 +93,7 @@ BACKEND_DIR = pathlib.Path(__file__).parent.resolve()
 PROJECT_ROOT = BACKEND_DIR.parent.resolve()
 CHROMA_DB_DIRECTORY = str(BACKEND_DIR / "chroma_db_store")
 DATA_PATH = str(PROJECT_ROOT / "data")
+EMBEDDING_CONFIG_FILE = str(BACKEND_DIR / "embedding_config.json")
 
 
 def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "openai")) -> Embeddings:
@@ -178,6 +182,71 @@ def get_embedding_function(provider: str = os.getenv("EMBEDDING_PROVIDER", "open
         return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
+def get_current_embedding_config() -> Dict[str, Any]:
+    """Get current embedding configuration for comparison."""
+    provider = os.getenv("EMBEDDING_PROVIDER", "openai").lower()
+    config = {"provider": provider}
+    
+    if provider == "openai":
+        config["model"] = "text-embedding-ada-002"  # Default OpenAI model
+    elif provider == "ollama":
+        config["model"] = os.getenv("OLLAMA_EMBEDDING_MODEL", "")
+        config["base_url"] = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    elif provider == "azure":
+        config["deployment"] = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", "")
+        config["endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    elif provider == "bedrock":
+        config["model_id"] = os.getenv("BEDROCK_EMBEDDING_MODEL_ID", "")
+        config["region"] = os.getenv("AWS_REGION", "")
+    elif provider == "lmstudio":
+        config["model"] = os.getenv("LM_STUDIO_EMBEDDING_MODEL", "")
+        config["base_url"] = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+    else:
+        config["model"] = "all-MiniLM-L6-v2"  # Default HuggingFace model
+    
+    return config
+
+
+def save_embedding_config(config: Dict[str, Any]) -> None:
+    """Save current embedding configuration to file."""
+    try:
+        with open(EMBEDDING_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        logging.debug(f"Saved embedding config to {EMBEDDING_CONFIG_FILE}")
+    except Exception as e:
+        logging.warning(f"Failed to save embedding config: {e}")
+
+
+def load_saved_embedding_config() -> Optional[Dict[str, Any]]:
+    """Load previously saved embedding configuration."""
+    try:
+        if os.path.exists(EMBEDDING_CONFIG_FILE):
+            with open(EMBEDDING_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            logging.debug(f"Loaded embedding config from {EMBEDDING_CONFIG_FILE}")
+            return config
+    except Exception as e:
+        logging.warning(f"Failed to load embedding config: {e}")
+    return None
+
+
+def has_embedding_config_changed() -> bool:
+    """Check if embedding configuration has changed since last run."""
+    current_config = get_current_embedding_config()
+    saved_config = load_saved_embedding_config()
+    
+    if saved_config is None:
+        logging.info("No previous embedding config found")
+        return True
+    
+    if current_config != saved_config:
+        logging.info(f"Embedding config changed from {saved_config} to {current_config}")
+        return True
+    
+    logging.debug("Embedding config unchanged")
+    return False
+
+
 def load_documents_from_directory(directory_path: str) -> Tuple[List[Document], List[str]]:
     documents: List[Document] = []
     failed_files: List[str] = []
@@ -234,6 +303,17 @@ def create_or_load_vector_db(
 
     persist_directory: str = CHROMA_DB_DIRECTORY
     vector_db: Optional[VectorStore] = None
+    
+    # Check if embedding configuration has changed
+    config_changed = has_embedding_config_changed()
+    if config_changed:
+        logging.warning("Embedding configuration has changed. The existing vector database may be incompatible.")
+        if os.path.exists(persist_directory):
+            if not documents:
+                logging.error("Embedding config changed but no documents provided to rebuild database.")
+                raise ValueError("Embedding configuration changed. Please provide documents to rebuild the vector database or set force_reload=True.")
+            logging.info("Automatically rebuilding vector database due to embedding config change...")
+            force_reload = True
 
     if force_reload and documents:
         logging.info("Forcing reload of vector database...")
@@ -254,15 +334,35 @@ def create_or_load_vector_db(
         )
         vector_db.persist()
         logging.info(f"Vector database created and persisted at {persist_directory}")
+        
+        # Save the current embedding config after successful database creation
+        current_config = get_current_embedding_config()
+        save_embedding_config(current_config)
+        
         return vector_db
     elif os.path.exists(persist_directory):
         logging.info(f"Loading existing vector database from {persist_directory}...")
-        vector_db = Chroma(
-            persist_directory=persist_directory,
-            embedding_function=embedding_function
-        )
-        logging.info("Vector database loaded.")
-        return vector_db
+        try:
+            vector_db = Chroma(
+                persist_directory=persist_directory,
+                embedding_function=embedding_function
+            )
+            logging.info("Vector database loaded.")
+            
+            # Save current config if it hasn't been saved yet
+            if config_changed:
+                current_config = get_current_embedding_config()
+                save_embedding_config(current_config)
+                
+            return vector_db
+        except Exception as e:
+            logging.error(f"Failed to load existing vector database: {e}")
+            if documents:
+                logging.info("Attempting to rebuild vector database...")
+                shutil.rmtree(persist_directory)
+                return create_or_load_vector_db(documents, embedding_function, force_reload=True)
+            else:
+                raise ValueError(f"Failed to load vector database and no documents provided for rebuild: {e}")
     elif documents:
          logging.info("No existing database found. Creating a new one...")
          logging.info("Splitting documents...")
@@ -278,6 +378,11 @@ def create_or_load_vector_db(
          )
          vector_db.persist()
          logging.info(f"Vector database created and persisted at {persist_directory}")
+         
+         # Save the current embedding config after successful database creation
+         current_config = get_current_embedding_config()
+         save_embedding_config(current_config)
+         
          return vector_db
     else:
         logging.error("Cannot create or load vector DB: No documents provided and no existing database found.")
@@ -317,7 +422,7 @@ def get_llm(provider: str = os.getenv("LLM_PROVIDER", "openai")) -> BaseLanguage
             logging.error("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
             raise ValueError("OLLAMA_LLM_MODEL not found in environment variables for Ollama LLM provider.")
         logging.info(f"Using Ollama LLM model: {ollama_llm_model} at {ollama_base_url}")
-        return Ollama(model=ollama_llm_model, base_url=ollama_base_url, temperature=temperature)
+        return OllamaLLM(model=ollama_llm_model, base_url=ollama_base_url, temperature=temperature)
     elif provider == "azure":
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
         azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")

@@ -1,0 +1,5 @@
+{
+  "provider": "ollama",
+  "model": "granite-embedding:278m",
+  "base_url": "http://localhost:11434"
+}

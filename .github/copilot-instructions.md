@@ -19,6 +19,22 @@ The core RAG pipeline is in `backend/utils.py`:
 3.  **Embeddings & LLMs**: `get_embedding_function` and `get_llm` dynamically select providers based on environment variables. This is the primary way the application is configured.
 4.  **QA Chain**: `create_qa_chain` builds the `ConversationalRetrievalChain` from Langchain.
 
+## Critical Rule: Always Navigate to Backend Directory
+
+**IMPORTANT**: Before running ANY backend-related commands (uvicorn, python scripts, etc.), you MUST first navigate to the backend directory. Every command should be prefixed with:
+
+```bash
+cd /Users/savg/Desktop/ai_agent_app/backend &&
+```
+
+For example:
+
+- `cd /Users/savg/Desktop/ai_agent_app/backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+- `cd /Users/savg/Desktop/ai_agent_app/backend && uv run python rebuild_db.py`
+- `cd /Users/savg/Desktop/ai_agent_app/backend && uv pip install package_name`
+
+This prevents errors caused by running commands from the wrong directory.
+
 ## Getting Started & Development Workflow
 
 1.  **Setup**: Follow the instructions in `README.md` to set up the Python virtual environment and install dependencies from `backend/requirements.txt`.
@@ -52,5 +68,24 @@ The application is configured almost entirely through environment variables defi
 
 When adding a new feature that requires configuration, prefer adding new environment variables and loading them in `utils.py` or `main.py`.
 
-
 <!-- use uv -->
+
+- use uv
+- run any python script making sure you are located at /Users/savg/Desktop/ai_agent_app/backend
+
+## ⚠️ CRITICAL TERMINAL NAVIGATION RULE ⚠️
+
+**EVERY terminal command that interacts with the backend MUST be prefixed with:**
+
+```bash
+cd /Users/savg/Desktop/ai_agent_app/backend &&
+```
+
+**This includes:**
+
+- Starting the server: `cd /Users/savg/Desktop/ai_agent_app/backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
+- Running scripts: `cd /Users/savg/Desktop/ai_agent_app/backend && uv run python script_name.py`
+- Installing packages: `cd /Users/savg/Desktop/ai_agent_app/backend && uv pip install package_name`
+- Any other backend operations
+
+**Failure to do this will result in "No such file or directory" errors.**
