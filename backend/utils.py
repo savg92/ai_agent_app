@@ -24,6 +24,7 @@ from langchain_openai import AzureOpenAI, AzureChatOpenAI
 import pathlib
 import requests
 import json
+import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -513,3 +514,106 @@ def answer_question(qa_chain: ConversationalRetrievalChain, question: str, chat_
         "chat_history": chat_history
     })
     return result["answer"], result["source_documents"]
+
+
+############################################################
+# --- Multi-Vector-Store Management (Multi-Store RAG) --- #
+############################################################
+
+VECTOR_STORES_DIR = pathlib.Path(__file__).parent.resolve() / "vector_stores"
+ACTIVE_STORE_CONFIG = pathlib.Path(__file__).parent.resolve() / "active_vector_store.json"
+VECTOR_STORES_DIR.mkdir(exist_ok=True)
+
+def get_vector_store_identifier(config: dict) -> str:
+    provider = config.get('provider', 'unknown')
+    model = config.get('model') or config.get('deployment') or config.get('model_id') or 'default'
+    # Normalize for filesystem
+    safe_model = str(model).replace(':', '_').replace('/', '_').replace(' ', '_')
+    return f"{provider}_{safe_model}"
+
+def get_vector_store_path(config: dict) -> pathlib.Path:
+    return VECTOR_STORES_DIR / get_vector_store_identifier(config)
+
+def save_store_metadata(store_path: pathlib.Path, config: dict, doc_count: int, chunk_count: int):
+    meta = dict(config)
+    meta['created_at'] = datetime.datetime.utcnow().isoformat() + 'Z'
+    meta['document_count'] = doc_count
+    meta['chunk_count'] = chunk_count
+    meta['last_used'] = meta['created_at']
+    meta['version'] = '1.0'
+    with open(store_path / 'metadata.json', 'w') as f:
+        json.dump(meta, f, indent=2)
+
+def load_store_metadata(store_path: pathlib.Path) -> dict:
+    try:
+        with open(store_path / 'metadata.json') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+class VectorStoreManager:
+    def __init__(self):
+        self.stores_dir = VECTOR_STORES_DIR
+        self.active_config_file = ACTIVE_STORE_CONFIG
+        self.stores_dir.mkdir(exist_ok=True)
+
+    def list_available_stores(self):
+        stores = []
+        for store_dir in self.stores_dir.iterdir():
+            if store_dir.is_dir():
+                meta = load_store_metadata(store_dir)
+                meta['identifier'] = store_dir.name
+                meta['path'] = str(store_dir)
+                stores.append(meta)
+        return stores
+
+    def get_or_create_store(self, config, documents=None, embedding_function=None):
+        store_path = get_vector_store_path(config)
+        persist_directory = str(store_path)
+        if store_path.exists() and (store_path / 'chroma.sqlite3').exists():
+            # Load existing
+            vector_db = Chroma(persist_directory=persist_directory, embedding_function=embedding_function)
+            # Update last_used
+            meta = load_store_metadata(store_path)
+            meta['last_used'] = datetime.datetime.utcnow().isoformat() + 'Z'
+            with open(store_path / 'metadata.json', 'w') as f:
+                json.dump(meta, f, indent=2)
+            return vector_db
+        else:
+            # Create new
+            if not documents:
+                raise ValueError("No documents provided to create new vector store.")
+            store_path.mkdir(exist_ok=True)
+            texts = split_documents(documents)
+            vector_db = Chroma.from_documents(
+                documents=texts,
+                embedding=embedding_function,
+                persist_directory=persist_directory
+            )
+            save_store_metadata(store_path, config, doc_count=len(documents), chunk_count=len(texts))
+            return vector_db
+
+    def delete_store(self, identifier: str) -> bool:
+        store_path = self.stores_dir / identifier
+        if store_path.exists():
+            shutil.rmtree(store_path)
+            return True
+        return False
+
+    def set_active_store(self, config: dict):
+        with open(self.active_config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+
+    def get_active_store_config(self) -> dict:
+        if self.active_config_file.exists():
+            with open(self.active_config_file) as f:
+                return json.load(f)
+        return {}
+
+    def delete_all_stores(self):
+        for store_dir in self.stores_dir.iterdir():
+            if store_dir.is_dir():
+                shutil.rmtree(store_dir)
+    
+    def get_vector_store_identifier(self, config: dict) -> str:
+        return get_vector_store_identifier(config)

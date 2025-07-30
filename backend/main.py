@@ -19,6 +19,8 @@ from utils import (
     answer_question,
     create_or_load_vector_db,
     load_documents_from_directory,
+    get_current_embedding_config,
+    VectorStoreManager,
     DATA_PATH,
     CHROMA_DB_DIRECTORY
 )
@@ -27,28 +29,37 @@ from utils import (
 vector_db: Optional[VectorStore] = None
 qa_chain: Optional[ConversationalRetrievalChain] = None
 chat_histories: Dict[str, List[Tuple[str, str]]] = {}
+vector_store_manager: Optional[VectorStoreManager] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_dotenv()
-    global vector_db, qa_chain
+    global vector_db, qa_chain, vector_store_manager
     logging.info("Application startup: Initializing QA chain...")
     try:
+        # Initialize vector store manager
+        vector_store_manager = VectorStoreManager()
+        
         embedding_func = get_embedding_function()
         llm = get_llm()
+        current_config = get_current_embedding_config()
 
-        logging.info(f"Attempting to load vector database from: {CHROMA_DB_DIRECTORY}")
+        logging.info(f"Current embedding config: {current_config}")
         
-        # Check if embedding config has changed and we need to rebuild
-        from utils import has_embedding_config_changed
-        config_changed = has_embedding_config_changed()
-        
-        if config_changed and os.path.exists(CHROMA_DB_DIRECTORY):
-            logging.warning("Embedding configuration has changed. Loading documents to rebuild vector database...")
+        # Try to get or create vector store using the new manager
+        try:
+            vector_db = vector_store_manager.get_or_create_store(
+                config=current_config,
+                embedding_function=embedding_func
+            )
+            logging.info("Successfully loaded existing vector store.")
+        except ValueError as e:
+            # No existing store or need documents to create new one
+            logging.info("No existing vector store found or documents needed. Loading documents...")
             if not os.path.exists(DATA_PATH):
-                logging.error(f"Data directory not found at {DATA_PATH}. Cannot rebuild vector database.")
-                raise RuntimeError(f"Data directory not found at {DATA_PATH}. Cannot rebuild vector database.")
+                logging.error(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
+                raise RuntimeError(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
             
             logging.info(f"Loading documents from: {DATA_PATH}")
             documents: List[LangchainDocument]
@@ -56,52 +67,21 @@ async def lifespan(app: FastAPI):
             documents, failed_files = load_documents_from_directory(DATA_PATH)
 
             if failed_files:
-                logging.warning(f"The following files failed to load during DB rebuild: {failed_files}")
-
-            if not documents:
-                logging.error("No documents loaded successfully. Cannot rebuild vector database.")
-                raise RuntimeError("No documents loaded successfully. Cannot rebuild vector database.")
-
-            logging.info(f"Rebuilding vector database with {len(documents)} documents due to config change...")
-            vector_db = create_or_load_vector_db(
-                documents=documents,
-                embedding_function=embedding_func,
-                force_reload=True  # Force rebuild due to config change
-            )
-        else:
-            # Try to load existing vector database
-            vector_db = create_or_load_vector_db(embedding_function=embedding_func, force_reload=False)
-
-        if vector_db is None:
-            logging.warning(f"Vector database not found at {CHROMA_DB_DIRECTORY}. Attempting to create it...")
-            if not os.path.exists(DATA_PATH):
-                 logging.error(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
-                 raise RuntimeError(f"Data directory not found at {DATA_PATH}. Cannot create vector database.")
-
-            logging.info(f"Loading documents from: {DATA_PATH}")
-            documents: List[LangchainDocument]
-            failed_files: List[str]
-            documents, failed_files = load_documents_from_directory(DATA_PATH)
-
-            if failed_files:
-                logging.warning(f"The following files failed to load during DB creation: {failed_files}")
+                logging.warning(f"The following files failed to load: {failed_files}")
 
             if not documents:
                 logging.error("No documents loaded successfully. Cannot create vector database.")
                 raise RuntimeError("No documents loaded successfully. Cannot create vector database.")
 
-            logging.info(f"Creating new vector database with {len(documents)} documents...")
-            vector_db = create_or_load_vector_db(
+            logging.info(f"Creating new vector store with {len(documents)} documents...")
+            vector_db = vector_store_manager.get_or_create_store(
+                config=current_config,
                 documents=documents,
-                embedding_function=embedding_func,
-                force_reload=False
+                embedding_function=embedding_func
             )
-
-            if vector_db is None:
-                logging.error("Failed to create vector database even after loading documents.")
-                raise RuntimeError("Failed to create vector database.")
-            else:
-                 logging.info("Vector database created successfully.")
+            
+        # Set this as the active store
+        vector_store_manager.set_active_store(current_config)
 
         qa_chain = create_qa_chain(vector_db, llm)
         logging.info("QA Chain initialized successfully.")
@@ -201,3 +181,97 @@ async def ask_question_endpoint(
 @app.get("/health")
 def health_check() -> Dict[str, Any]:
     return {"status": "ok", "qa_chain_initialized": qa_chain is not None}
+
+
+@app.get("/vector-stores")
+def list_vector_stores() -> Dict[str, Any]:
+    """List all available vector stores."""
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+    
+    stores = vector_store_manager.list_available_stores()
+    active_config = vector_store_manager.get_active_store_config()
+    
+    return {
+        "stores": stores,
+        "active_config": active_config,
+        "total_stores": len(stores)
+    }
+
+
+@app.delete("/vector-stores/{identifier}")
+def delete_vector_store(identifier: str) -> Dict[str, Any]:
+    """Delete a specific vector store by identifier."""
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+    
+    success = vector_store_manager.delete_store(identifier)
+    if success:
+        return {"message": f"Vector store '{identifier}' deleted successfully."}
+    else:
+        raise HTTPException(status_code=404, detail=f"Vector store '{identifier}' not found.")
+
+
+@app.delete("/vector-stores")
+def delete_all_vector_stores() -> Dict[str, Any]:
+    """Delete all vector stores."""
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+    
+    vector_store_manager.delete_all_stores()
+    return {"message": "All vector stores deleted successfully."}
+
+
+class RebuildStoreRequest(BaseModel):
+    force: bool = False
+
+
+@app.post("/vector-stores/rebuild")
+def rebuild_current_vector_store(request: RebuildStoreRequest) -> Dict[str, Any]:
+    """Rebuild the current vector store with fresh documents."""
+    global vector_db, qa_chain
+    
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+    
+    try:
+        # Load documents
+        if not os.path.exists(DATA_PATH):
+            raise HTTPException(status_code=400, detail=f"Data directory not found at {DATA_PATH}.")
+        
+        documents, failed_files = load_documents_from_directory(DATA_PATH)
+        
+        if not documents:
+            raise HTTPException(status_code=400, detail="No documents loaded successfully.")
+        
+        # Get current config and embedding function
+        current_config = get_current_embedding_config()
+        embedding_func = get_embedding_function()
+        llm = get_llm()
+        
+        # Delete existing store for this config if force is True
+        if request.force:
+            identifier = vector_store_manager.get_vector_store_identifier(current_config)
+            vector_store_manager.delete_store(identifier)
+        
+        # Create new store
+        vector_db = vector_store_manager.get_or_create_store(
+            config=current_config,
+            documents=documents,
+            embedding_function=embedding_func
+        )
+        
+        # Update QA chain
+        qa_chain = create_qa_chain(vector_db, llm)
+        vector_store_manager.set_active_store(current_config)
+        
+        return {
+            "message": "Vector store rebuilt successfully.",
+            "document_count": len(documents),
+            "failed_files": failed_files,
+            "config": current_config
+        }
+        
+    except Exception as e:
+        logging.error(f"Error rebuilding vector store: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rebuild vector store: {e}")

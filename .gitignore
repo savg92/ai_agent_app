@@ -6,6 +6,9 @@ __pycache__/
 dist/
 build/
 *.log
+*.sqlite
+*.sqlite3
+*.db
 
 # Virtual environments
 venv/
@@ -17,6 +20,9 @@ ENV/
 # Environment variables
 backend/.env
 backend/chroma_db_store/
+backend/vector_stores/
+backend/active_vector_store.json
+backend/embedding_config.json
 frontend/.env
 
 # VSCode settings
@@ -31,9 +37,18 @@ node_modules/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
+# Temporary files and backups
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.#*
+
 # Data outputs (if generated)
 data/*.tmp
 data/*.log
+data/*.backup
 !data/
 data/*
 
