@@ -52,6 +52,4 @@ data/*.backup
 !data/
 data/*
 
-# Ignore local data if needed (uncomment if you want to ignore these)
-# data/local_news.json
-# data/tax_policies.txt
+
