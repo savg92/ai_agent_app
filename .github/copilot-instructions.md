@@ -69,7 +69,6 @@ The application is configured almost entirely through environment variables defi
 When adding a new feature that requires configuration, prefer adding new environment variables and loading them in `utils.py` or `main.py`.
 
 <!-- use uv -->
-
 - use uv
 - run any python script making sure you are located at /Users/savg/Desktop/ai_agent_app/backend
 

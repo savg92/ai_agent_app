@@ -1,3 +1,6 @@
+# This file is auto-generated from pyproject.toml
+# To update, run: python sync_deps.py --from-pyproject
+
 aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.11.16
@@ -23,6 +26,7 @@ cryptography==44.0.2
 dataclasses-json==0.6.7
 deprecated==1.2.18
 distro==1.9.0
+dotenv>=0.9.9
 durationpy==0.9
 emoji==2.14.1
 eval-type-backport==0.2.2
@@ -39,8 +43,8 @@ h11==0.14.0
 html5lib==1.1
 httpcore==1.0.8
 httptools==0.6.4
-httpx==0.28.1
 httpx-sse==0.4.0
+httpx==0.28.1
 huggingface-hub==0.30.2
 humanfriendly==10.0
 idna==3.10
@@ -52,14 +56,14 @@ joblib==1.4.2
 jq==1.8.0
 jsonpatch==1.33
 jsonpointer==3.0.0
-jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
+jsonschema==4.23.0
 kubernetes==32.0.1
-langchain==0.3.23
 langchain-community==0.3.21
 langchain-core==0.3.54
 langchain-openai==0.3.14
 langchain-text-splitters==0.3.8
+langchain==0.3.23
 langdetect==1.0.9
 langsmith==0.3.32
 lxml==5.3.2
@@ -83,9 +87,9 @@ openai==1.75.0
 opentelemetry-api==1.32.1
 opentelemetry-exporter-otlp-proto-common==1.32.1
 opentelemetry-exporter-otlp-proto-grpc==1.32.1
-opentelemetry-instrumentation==0.53b1
 opentelemetry-instrumentation-asgi==0.53b1
 opentelemetry-instrumentation-fastapi==0.53b1
+opentelemetry-instrumentation==0.53b1
 opentelemetry-proto==1.32.1
 opentelemetry-sdk==1.32.1
 opentelemetry-semantic-conventions==0.53b1
@@ -98,12 +102,12 @@ posthog==3.25.0
 propcache==0.3.1
 protobuf==5.29.4
 psutil==7.0.0
-pyasn1==0.6.1
 pyasn1-modules==0.4.2
+pyasn1==0.6.1
 pycparser==2.22
-pydantic==2.11.3
 pydantic-core==2.33.1
 pydantic-settings==2.8.1
+pydantic==2.11.3
 pygments==2.19.1
 pypdf==5.4.0
 pypika==0.48.9
@@ -117,9 +121,9 @@ pyyaml==6.0.2
 rapidfuzz==3.13.0
 referencing==0.36.2
 regex==2024.11.6
-requests==2.32.3
 requests-oauthlib==2.0.0
 requests-toolbelt==1.0.0
+requests==2.32.3
 rich==14.0.0
 rpds-py==0.24.0
 rsa==4.9.1
@@ -146,10 +150,10 @@ typer==0.15.2
 typing-extensions==4.13.2
 typing-inspect==0.9.0
 typing-inspection==0.4.0
-unstructured==0.17.2
 unstructured-client==0.32.4
+unstructured==0.17.2
 urllib3==2.4.0
-uvicorn==0.34.1
+uvicorn[standard]==0.34.1
 uvloop==0.21.0
 watchfiles==1.0.5
 webencodings==0.5.1
