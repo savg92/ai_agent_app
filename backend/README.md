@@ -175,7 +175,7 @@ curl -X POST "http://localhost:8000/ask" \
 
 ### **Vector Store Management**
 
-```bash
+````bash
 # List all vector stores
 curl -X GET "http://localhost:8000/vector-stores"
 
@@ -189,7 +189,38 @@ curl -X POST "http://localhost:8000/vector-stores/rebuild" \
 
 # Health check
 curl -X GET "http://localhost:8000/health"
-```
+
+### **Runtime LLM Switching**
+
+You can change the LLM provider without restarting the server. The vector store and sessions remain intact.
+
+```bash
+# Inspect current LLM
+curl -X GET "http://localhost:8000/llm"
+
+# Switch to Ollama (example)
+curl -X POST "http://localhost:8000/llm" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "provider": "ollama",
+        "ollama_llm_model": "llama3.2:3b",
+        "ollama_base_url": "http://localhost:11434",
+        "llm_temperature": 0.7
+    }'
+
+# Switch to Azure OpenAI (example)
+curl -X POST "http://localhost:8000/llm" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "provider": "azure",
+        "azure_api_key": "<key>",
+        "azure_endpoint": "https://<resource>.openai.azure.com/",
+        "azure_api_version": "2024-02-01",
+        "azure_llm_deployment": "gpt-4o-mini"
+    }'
+````
+
+````
 
 ## 🧩 **Modular Development**
 
@@ -201,7 +232,7 @@ curl -X GET "http://localhost:8000/health"
 elif provider == "new_provider":
     # Implementation here
     return NewProviderEmbeddings(...)
-```
+````
 
 2. **Add Configuration** (`config/settings.py`):
 

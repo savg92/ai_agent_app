@@ -65,6 +65,80 @@ class Settings:
         
         # Telemetry settings
         os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+
+    # ---- Runtime update helpers (non-persistent) ----
+    def update_llm_settings(self, provider: str, **kwargs) -> None:
+        """Update LLM provider and related settings at runtime without process restart.
+        Values are held in-memory; env vars are not modified."""
+        if not provider:
+            return
+        self.llm_provider = provider.lower()
+
+        # Common knobs
+        self.llm_temperature = kwargs.get('llm_temperature', self.llm_temperature)
+
+        # Provider-specific fields (optional; only update if provided)
+        # OpenAI
+        if 'openai_api_key' in kwargs:
+            self.openai_api_key = kwargs['openai_api_key']
+
+        # Ollama
+        if 'ollama_llm_model' in kwargs:
+            self.ollama_llm_model = kwargs['ollama_llm_model']
+        if 'ollama_base_url' in kwargs:
+            self.ollama_base_url = kwargs['ollama_base_url']
+
+        # Azure OpenAI
+        if 'azure_api_key' in kwargs:
+            self.azure_api_key = kwargs['azure_api_key']
+        if 'azure_endpoint' in kwargs:
+            self.azure_endpoint = kwargs['azure_endpoint']
+        if 'azure_api_version' in kwargs:
+            self.azure_api_version = kwargs['azure_api_version']
+        if 'azure_llm_deployment' in kwargs:
+            self.azure_llm_deployment = kwargs['azure_llm_deployment']
+
+        # Bedrock
+        if 'bedrock_model_id' in kwargs:
+            self.bedrock_model_id = kwargs['bedrock_model_id']
+        if 'aws_region' in kwargs:
+            self.aws_region = kwargs['aws_region']
+        if 'aws_profile' in kwargs:
+            self.aws_profile = kwargs['aws_profile']
+        if 'aws_access_key_id' in kwargs:
+            self.aws_access_key_id = kwargs['aws_access_key_id']
+        if 'aws_secret_access_key' in kwargs:
+            self.aws_secret_access_key = kwargs['aws_secret_access_key']
+
+        # LM Studio
+        if 'lm_studio_model' in kwargs:
+            self.lm_studio_model = kwargs['lm_studio_model']
+        if 'lm_studio_base_url' in kwargs:
+            self.lm_studio_base_url = kwargs['lm_studio_base_url']
+        if 'lm_studio_api_key' in kwargs:
+            self.lm_studio_api_key = kwargs['lm_studio_api_key']
+
+    def current_llm_config(self) -> dict:
+        """Return a sanitized snapshot of current LLM config (no secrets leaked)."""
+        data = {
+            'provider': self.llm_provider,
+        }
+        if self.llm_provider == 'openai':
+            data['model'] = 'gpt-*'
+        elif self.llm_provider == 'ollama':
+            data['ollama_llm_model'] = self.ollama_llm_model
+            data['ollama_base_url'] = self.ollama_base_url
+        elif self.llm_provider == 'azure':
+            data['azure_endpoint'] = self.azure_endpoint
+            data['azure_api_version'] = self.azure_api_version
+            data['azure_llm_deployment'] = self.azure_llm_deployment
+        elif self.llm_provider == 'bedrock':
+            data['bedrock_model_id'] = self.bedrock_model_id
+            data['aws_region'] = self.aws_region
+        elif self.llm_provider == 'lmstudio':
+            data['lm_studio_model'] = self.lm_studio_model
+            data['lm_studio_base_url'] = self.lm_studio_base_url
+        return data
     
     def _get_float_env(self, key: str, default: float, min_val: float = None, max_val: float = None) -> float:
         """Get float environment variable with validation."""

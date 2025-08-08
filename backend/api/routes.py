@@ -4,11 +4,12 @@ import os
 import logging
 import traceback
 from typing import List, Tuple, Dict, Any
+import threading
 from fastapi import APIRouter, HTTPException, Depends
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.documents import Document as LangchainDocument
 
-from core.models import AskRequest, AskResponse, SourceDocument, RebuildStoreRequest
+from core.models import AskRequest, AskResponse, SourceDocument, RebuildStoreRequest, LLMUpdateRequest, LLMConfigResponse
 from services import DocumentService, VectorStoreService, QAService, VectorStoreManager
 from providers import EmbeddingProviderFactory, LLMProviderFactory
 from config import get_paths, get_settings
@@ -20,6 +21,7 @@ router = APIRouter()
 qa_chain: ConversationalRetrievalChain = None
 chat_histories: Dict[str, List[Tuple[str, str]]] = {}
 vector_store_manager: VectorStoreManager = None
+qa_chain_lock = threading.Lock()
 
 
 def get_initialized_qa_chain() -> ConversationalRetrievalChain:
@@ -80,6 +82,65 @@ async def ask_question_endpoint(
 def health_check() -> Dict[str, Any]:
     """Health check endpoint."""
     return {"status": "ok", "qa_chain_initialized": qa_chain is not None}
+
+
+@router.get("/llm", response_model=LLMConfigResponse)
+def get_current_llm() -> LLMConfigResponse:
+    """Get current LLM configuration snapshot (sanitized)."""
+    settings = get_settings()
+    return LLMConfigResponse(provider=settings.llm_provider, details=settings.current_llm_config())
+
+
+@router.post("/llm", response_model=LLMConfigResponse)
+def update_llm(request: LLMUpdateRequest) -> LLMConfigResponse:
+    """Update/switch the LLM provider at runtime and refresh the QA chain."""
+    global qa_chain
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+
+    # Update settings in-memory
+    settings = get_settings()
+    settings.update_llm_settings(
+        request.provider,
+        llm_temperature=getattr(request, 'llm_temperature', None),
+        openai_api_key=request.api_key,
+        ollama_llm_model=request.ollama_llm_model or request.model,
+        ollama_base_url=request.ollama_base_url or request.base_url,
+        azure_api_key=request.azure_api_key,
+        azure_endpoint=request.azure_endpoint,
+        azure_api_version=request.azure_api_version,
+        azure_llm_deployment=request.azure_llm_deployment,
+        bedrock_model_id=request.bedrock_model_id,
+        aws_region=request.aws_region,
+        aws_profile=request.aws_profile,
+        aws_access_key_id=request.aws_access_key_id,
+        aws_secret_access_key=request.aws_secret_access_key,
+        lm_studio_model=request.lm_studio_model or request.model,
+        lm_studio_base_url=request.lm_studio_base_url or request.base_url,
+        lm_studio_api_key=request.lm_studio_api_key or request.api_key,
+    )
+
+    try:
+        # Create new LLM instance
+        llm = LLMProviderFactory.create_llm()
+        # Rebuild QA chain using existing active vector store
+        active_config = vector_store_manager.get_active_store_config()
+        if not active_config:
+            raise HTTPException(status_code=503, detail="No active vector store configured.")
+        embedding_func = EmbeddingProviderFactory.create_embedding_function()
+        vector_db = vector_store_manager.get_or_create_store(active_config, embedding_function=embedding_func)
+        qa_service = QAService()
+        new_chain = qa_service.create_qa_chain(vector_db, llm)
+        # Atomic swap under lock
+        with qa_chain_lock:
+            qa_chain = new_chain
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to update LLM: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update LLM: {e}")
+
+    return LLMConfigResponse(provider=settings.llm_provider, details=settings.current_llm_config())
 
 
 @router.get("/vector-stores")
