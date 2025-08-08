@@ -57,3 +57,33 @@ class LLMConfigResponse(BaseModel):
     """Response model with current LLM configuration snapshot."""
     provider: str
     details: Dict[str, Any]
+
+
+class EmbeddingUpdateRequest(BaseModel):
+    """Request model to update embedding provider/model at runtime."""
+    provider: str
+    # Common fields
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    # Provider-specific
+    ollama_embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    azure_api_key: Optional[str] = None
+    azure_endpoint: Optional[str] = None
+    azure_api_version: Optional[str] = None
+    azure_embedding_deployment: Optional[str] = None
+    bedrock_embedding_model_id: Optional[str] = None
+    aws_region: Optional[str] = None
+    aws_profile: Optional[str] = None
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    lm_studio_embedding_model: Optional[str] = None
+    lm_studio_base_url: Optional[str] = None
+    lm_studio_api_key: Optional[str] = None
+
+
+class EmbeddingConfigResponse(BaseModel):
+    """Response model with current embedding config snapshot."""
+    provider: str
+    details: Dict[str, Any]

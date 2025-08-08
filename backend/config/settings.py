@@ -139,6 +139,76 @@ class Settings:
             data['lm_studio_model'] = self.lm_studio_model
             data['lm_studio_base_url'] = self.lm_studio_base_url
         return data
+
+    # Embeddings runtime controls
+    def update_embedding_settings(self, provider: str, **kwargs) -> None:
+        """Update embedding provider and related settings at runtime (in-memory)."""
+        if not provider:
+            return
+        self.embedding_provider = provider.lower()
+
+        # OpenAI
+        if 'openai_api_key' in kwargs:
+            self.openai_api_key = kwargs['openai_api_key']
+
+        # Ollama
+        if 'ollama_embedding_model' in kwargs:
+            self.ollama_embedding_model = kwargs['ollama_embedding_model']
+        if 'ollama_base_url' in kwargs:
+            self.ollama_base_url = kwargs['ollama_base_url']
+
+        # Azure
+        if 'azure_api_key' in kwargs:
+            self.azure_api_key = kwargs['azure_api_key']
+        if 'azure_endpoint' in kwargs:
+            self.azure_endpoint = kwargs['azure_endpoint']
+        if 'azure_api_version' in kwargs:
+            self.azure_api_version = kwargs['azure_api_version']
+        if 'azure_embedding_deployment' in kwargs:
+            self.azure_embedding_deployment = kwargs['azure_embedding_deployment']
+
+        # Bedrock
+        if 'bedrock_embedding_model_id' in kwargs:
+            self.bedrock_embedding_model_id = kwargs['bedrock_embedding_model_id']
+        if 'aws_region' in kwargs:
+            self.aws_region = kwargs['aws_region']
+        if 'aws_profile' in kwargs:
+            self.aws_profile = kwargs['aws_profile']
+        if 'aws_access_key_id' in kwargs:
+            self.aws_access_key_id = kwargs['aws_access_key_id']
+        if 'aws_secret_access_key' in kwargs:
+            self.aws_secret_access_key = kwargs['aws_secret_access_key']
+
+        # LM Studio
+        if 'lm_studio_embedding_model' in kwargs:
+            self.lm_studio_embedding_model = kwargs['lm_studio_embedding_model']
+        if 'lm_studio_base_url' in kwargs:
+            self.lm_studio_base_url = kwargs['lm_studio_base_url']
+        if 'lm_studio_api_key' in kwargs:
+            self.lm_studio_api_key = kwargs['lm_studio_api_key']
+
+    def current_embedding_config(self) -> dict:
+        """Return the current embedding configuration for vector store identification."""
+        data = {
+            'provider': self.embedding_provider,
+        }
+        if self.embedding_provider == 'openai':
+            data['model'] = 'text-embedding-ada-002'
+        elif self.embedding_provider == 'ollama':
+            data['model'] = self.ollama_embedding_model
+            data['base_url'] = self.ollama_base_url
+        elif self.embedding_provider == 'azure':
+            data['deployment'] = self.azure_embedding_deployment
+            data['endpoint'] = self.azure_endpoint
+        elif self.embedding_provider == 'bedrock':
+            data['model_id'] = self.bedrock_embedding_model_id
+            data['region'] = self.aws_region
+        elif self.embedding_provider == 'lmstudio':
+            data['model'] = self.lm_studio_embedding_model
+            data['base_url'] = self.lm_studio_base_url
+        else:
+            data['model'] = 'all-MiniLM-L6-v2'
+        return data
     
     def _get_float_env(self, key: str, default: float, min_val: float = None, max_val: float = None) -> float:
         """Get float environment variable with validation."""

@@ -9,7 +9,16 @@ from fastapi import APIRouter, HTTPException, Depends
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.documents import Document as LangchainDocument
 
-from core.models import AskRequest, AskResponse, SourceDocument, RebuildStoreRequest, LLMUpdateRequest, LLMConfigResponse
+from core.models import (
+    AskRequest,
+    AskResponse,
+    SourceDocument,
+    RebuildStoreRequest,
+    LLMUpdateRequest,
+    LLMConfigResponse,
+    EmbeddingUpdateRequest,
+    EmbeddingConfigResponse,
+)
 from services import DocumentService, VectorStoreService, QAService, VectorStoreManager
 from providers import EmbeddingProviderFactory, LLMProviderFactory
 from config import get_paths, get_settings
@@ -141,6 +150,83 @@ def update_llm(request: LLMUpdateRequest) -> LLMConfigResponse:
         raise HTTPException(status_code=500, detail=f"Failed to update LLM: {e}")
 
     return LLMConfigResponse(provider=settings.llm_provider, details=settings.current_llm_config())
+
+
+@router.get("/embeddings", response_model=EmbeddingConfigResponse)
+def get_current_embeddings() -> EmbeddingConfigResponse:
+    """Get current embedding configuration snapshot."""
+    settings = get_settings()
+    return EmbeddingConfigResponse(provider=settings.embedding_provider, details=settings.current_embedding_config())
+
+
+@router.post("/embeddings", response_model=EmbeddingConfigResponse)
+def update_embeddings(request: EmbeddingUpdateRequest) -> EmbeddingConfigResponse:
+    """Update/switch the embedding provider at runtime, load or build the corresponding vector store, and refresh the QA chain."""
+    global qa_chain
+    if vector_store_manager is None:
+        raise HTTPException(status_code=503, detail="Vector store manager not initialized.")
+
+    settings = get_settings()
+    # Apply in-memory settings update
+    settings.update_embedding_settings(
+        request.provider,
+        openai_api_key=request.api_key,
+        ollama_embedding_model=request.ollama_embedding_model or request.model,
+        ollama_base_url=request.ollama_base_url or request.base_url,
+        azure_api_key=request.azure_api_key,
+        azure_endpoint=request.azure_endpoint,
+        azure_api_version=request.azure_api_version,
+        azure_embedding_deployment=request.azure_embedding_deployment,
+        bedrock_embedding_model_id=request.bedrock_embedding_model_id,
+        aws_region=request.aws_region,
+        aws_profile=request.aws_profile,
+        aws_access_key_id=request.aws_access_key_id,
+        aws_secret_access_key=request.aws_secret_access_key,
+        lm_studio_embedding_model=request.lm_studio_embedding_model or request.model,
+        lm_studio_base_url=request.lm_studio_base_url or request.base_url,
+        lm_studio_api_key=request.lm_studio_api_key or request.api_key,
+    )
+
+    try:
+        # Build embedding function for the selected provider
+        embedding_func = EmbeddingProviderFactory.create_embedding_function()
+        # Derive current embedding config and resolve or create vector store
+        current_config = settings.current_embedding_config()
+        # If existing store exists, load it. Otherwise, create from documents.
+        try:
+            vector_db = vector_store_manager.get_or_create_store(
+                config=current_config,
+                embedding_function=embedding_func,
+            )
+        except ValueError:
+            # Need documents to create new store
+            paths = get_paths()
+            if not os.path.exists(paths.data_path):
+                raise HTTPException(status_code=400, detail=f"Data directory not found at {paths.data_path}.")
+            doc_service = DocumentService()
+            documents, failed_files = doc_service.load_documents_from_directory(paths.data_path)
+            if not documents:
+                raise HTTPException(status_code=400, detail="No documents loaded successfully to build vector store.")
+            vector_db = vector_store_manager.get_or_create_store(
+                config=current_config,
+                documents=documents,
+                embedding_function=embedding_func,
+            )
+        # Recreate QA chain using the active LLM
+        llm = LLMProviderFactory.create_llm()
+        qa_service = QAService()
+        new_chain = qa_service.create_qa_chain(vector_db, llm)
+        with qa_chain_lock:
+            qa_chain = new_chain
+        # Mark as active
+        vector_store_manager.set_active_store(current_config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Failed to update embeddings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update embeddings: {e}")
+
+    return EmbeddingConfigResponse(provider=settings.embedding_provider, details=settings.current_embedding_config())
 
 
 @router.get("/vector-stores")

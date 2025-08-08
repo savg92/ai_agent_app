@@ -241,6 +241,33 @@ elif provider == "new_provider":
 self.new_provider_api_key = os.getenv("NEW_PROVIDER_API_KEY")
 ```
 
+### **Runtime Embedding Switching**
+
+Switch the embedding provider/model at runtime. If a matching vector store exists, it will be loaded; otherwise, a new one will be built from the documents in `data/`.
+
+```bash
+# Inspect current embeddings
+curl -X GET "http://localhost:8000/embeddings"
+
+# Switch to Ollama embeddings (example)
+curl -X POST "http://localhost:8000/embeddings" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "provider": "ollama",
+        "ollama_embedding_model": "granite-embedding:278m",
+        "ollama_base_url": "http://localhost:11434"
+    }'
+
+# Switch to LM Studio embeddings (example)
+curl -X POST "http://localhost:8000/embeddings" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "provider": "lmstudio",
+        "lm_studio_embedding_model": "text-embedding-qwen3-embedding-0.6b",
+        "lm_studio_base_url": "http://localhost:1234"
+    }'
+```
+
 ### **Creating a New Service**
 
 1. **Create Service** (`services/new_service.py`):
