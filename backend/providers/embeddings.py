@@ -2,6 +2,7 @@
 
 import logging
 import requests
+from requests import Session
 from typing import List
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
@@ -14,18 +15,20 @@ from config import get_settings
 class LMStudioEmbeddings(Embeddings):
     """Custom embedding class for LM Studio that handles the API format correctly."""
     
-    def __init__(self, base_url: str, model: str, api_key: str = "lm-studio"):
+    def __init__(self, base_url: str, model: str, api_key: str = "lm-studio", batch_size: int = 64):
         self.base_url = base_url.rstrip('/') + '/v1'
         self.model = model
         self.api_key = api_key
+        self.batch_size = max(1, int(batch_size))
+        self._session: Session = requests.Session()
     
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of documents."""
-        embeddings = []
-        for text in texts:
-            embedding = self._get_embedding(text)
-            embeddings.append(embedding)
-        return embeddings
+        """Embed a list of documents with simple batching to reduce overhead."""
+        out: List[List[float]] = []
+        for i in range(0, len(texts), self.batch_size):
+            batch = texts[i:i + self.batch_size]
+            out.extend(self._get_embeddings_batch(batch))
+        return out
     
     def embed_query(self, text: str) -> List[float]:
         """Embed a single query text."""
@@ -33,32 +36,29 @@ class LMStudioEmbeddings(Embeddings):
     
     def _get_embedding(self, text: str) -> List[float]:
         """Get embedding for a single text using LM Studio API."""
+        return self._get_embeddings_batch([text])[0]
+
+    def _get_embeddings_batch(self, batch: List[str]) -> List[List[float]]:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
-        
         payload = {
-            "input": text,  # LM Studio expects 'input' as a string
+            "input": batch if len(batch) > 1 else batch[0],  # LM Studio supports string or array
             "model": self.model
         }
-        
         try:
-            response = requests.post(
+            response = self._session.post(
                 f"{self.base_url}/embeddings",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=60
             )
             response.raise_for_status()
-            
             result = response.json()
-            
             if 'data' in result and len(result['data']) > 0:
-                return result['data'][0]['embedding']
-            else:
-                raise ValueError(f"Unexpected response format from LM Studio: {result}")
-                
+                return [item['embedding'] for item in result['data']]
+            raise ValueError(f"Unexpected response format from LM Studio: {result}")
         except requests.exceptions.RequestException as e:
             logging.error(f"Error calling LM Studio embedding API: {e}")
             raise ValueError(f"Failed to get embedding from LM Studio: {e}")
@@ -144,7 +144,8 @@ class EmbeddingProviderFactory:
             return LMStudioEmbeddings(
                 base_url=settings.lm_studio_base_url,
                 model=settings.lm_studio_embedding_model,
-                api_key=settings.lm_studio_api_key
+                api_key=settings.lm_studio_api_key,
+                batch_size=getattr(settings, 'embedding_batch_size', 64),
             )
 
         else:

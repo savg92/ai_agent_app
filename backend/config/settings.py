@@ -33,6 +33,10 @@ class Settings:
         # LLM settings
         self.llm_temperature = self._get_float_env("LLM_TEMPERATURE", 0.7, 0.0, 2.0)
         self.retriever_k = self._get_int_env("RETRIEVER_K", 3, min_val=1)
+        self.retriever_search_type = os.getenv("RETRIEVER_SEARCH_TYPE", "similarity").lower()
+        self.retriever_score_threshold = self._get_float_env("RETRIEVER_SCORE_THRESHOLD", 0.2, 0.0, 1.0)
+        self.chat_history_max_turns = self._get_int_env("CHAT_HISTORY_MAX_TURNS", 8, min_val=0)
+        self.embedding_batch_size = self._get_int_env("EMBEDDING_BATCH_SIZE", 64, min_val=1)
         
         # OpenAI settings
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
