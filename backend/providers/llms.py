@@ -95,5 +95,19 @@ class LLMProviderFactory:
                 temperature=temperature
             )
         
+        elif provider == "openrouter":
+            if not settings.openrouter_api_key:
+                raise ValueError("OPENROUTER_API_KEY not found in environment variables for OpenRouter provider.")
+            if not settings.openrouter_model:
+                raise ValueError("OPENROUTER_MODEL not found in environment variables for OpenRouter provider.")
+            
+            logging.info(f"Using OpenRouter model: {settings.openrouter_model}")
+            return ChatOpenAI(
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                model=settings.openrouter_model,
+                temperature=temperature
+            )
+        
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")

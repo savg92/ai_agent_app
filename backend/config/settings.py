@@ -67,6 +67,11 @@ class Settings:
         self.lm_studio_embedding_model = os.getenv("LM_STUDIO_EMBEDDING_MODEL")
         self.lm_studio_model = os.getenv("LM_STUDIO_MODEL")
         
+        # OpenRouter settings
+        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        self.openrouter_model = os.getenv("OPENROUTER_MODEL")
+        self.openrouter_embedding_model = os.getenv("OPENROUTER_EMBEDDING_MODEL")
+        
         # Telemetry settings
         os.environ['ANONYMIZED_TELEMETRY'] = 'False'
 
@@ -122,6 +127,14 @@ class Settings:
         if 'lm_studio_api_key' in kwargs:
             self.lm_studio_api_key = kwargs['lm_studio_api_key']
 
+        # OpenRouter
+        if 'openrouter_api_key' in kwargs:
+            self.openrouter_api_key = kwargs['openrouter_api_key']
+        if 'openrouter_model' in kwargs:
+            self.openrouter_model = kwargs['openrouter_model']
+        if 'openrouter_embedding_model' in kwargs:
+            self.openrouter_embedding_model = kwargs['openrouter_embedding_model']
+
     def current_llm_config(self) -> dict:
         """Return a sanitized snapshot of current LLM config (no secrets leaked)."""
         data = {
@@ -142,6 +155,8 @@ class Settings:
         elif self.llm_provider == 'lmstudio':
             data['lm_studio_model'] = self.lm_studio_model
             data['lm_studio_base_url'] = self.lm_studio_base_url
+        elif self.llm_provider == 'openrouter':
+            data['openrouter_model'] = self.openrouter_model
         return data
 
     # Embeddings runtime controls
@@ -191,6 +206,12 @@ class Settings:
         if 'lm_studio_api_key' in kwargs:
             self.lm_studio_api_key = kwargs['lm_studio_api_key']
 
+        # OpenRouter
+        if 'openrouter_api_key' in kwargs:
+            self.openrouter_api_key = kwargs['openrouter_api_key']
+        if 'openrouter_embedding_model' in kwargs:
+            self.openrouter_embedding_model = kwargs['openrouter_embedding_model']
+
     def current_embedding_config(self) -> dict:
         """Return the current embedding configuration for vector store identification."""
         data = {
@@ -210,6 +231,8 @@ class Settings:
         elif self.embedding_provider == 'lmstudio':
             data['model'] = self.lm_studio_embedding_model
             data['base_url'] = self.lm_studio_base_url
+        elif self.embedding_provider == 'openrouter':
+            data['model'] = self.openrouter_embedding_model
         else:
             data['model'] = 'all-MiniLM-L6-v2'
         return data

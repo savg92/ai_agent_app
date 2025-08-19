@@ -148,6 +148,19 @@ class EmbeddingProviderFactory:
                 batch_size=getattr(settings, 'embedding_batch_size', 64),
             )
 
+        elif provider == "openrouter":
+            if not settings.openrouter_api_key:
+                raise ValueError("OPENROUTER_API_KEY not found in environment variables for OpenRouter embedding provider.")
+            if not settings.openrouter_embedding_model:
+                raise ValueError("OPENROUTER_EMBEDDING_MODEL not found in environment variables for OpenRouter embedding provider.")
+            
+            logging.info(f"Using OpenRouter embedding model: {settings.openrouter_embedding_model}")
+            return OpenAIEmbeddings(
+                api_key=settings.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                model=settings.openrouter_embedding_model
+            )
+
         else:
             logging.info("Provider not explicitly supported or specified, defaulting to Sentence Transformers (all-MiniLM-L6-v2).")
             return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
