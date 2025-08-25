@@ -5,11 +5,13 @@ from .vector_store_service import VectorStoreService
 from .qa_service import QAService
 from .vector_store_manager import VectorStoreManager
 from .configuration_service import ConfigurationService
+from .api_handler_service import APIHandlerService
 
 __all__ = [
     "DocumentService", 
     "VectorStoreService", 
     "QAService", 
     "VectorStoreManager",
-    "ConfigurationService"
+    "ConfigurationService",
+    "APIHandlerService"
 ]

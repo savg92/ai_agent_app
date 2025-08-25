@@ -88,6 +88,8 @@ class VectorStoreManager:
         
         if store_path.exists() and (store_path / 'chroma.sqlite3').exists():
             # Load existing
+            if embedding_function is None:
+                raise ValueError("An Embeddings instance is required to load an existing vector store.")
             vector_db = self.vector_store_service.load_vector_store(
                 embedding_function, persist_directory
             )
@@ -101,6 +103,8 @@ class VectorStoreManager:
             # Create new
             if not documents:
                 raise ValueError("No documents provided to create new vector store.")
+            if embedding_function is None:
+                raise ValueError("An Embeddings instance is required to create a new vector store.")
             
             store_path.mkdir(exist_ok=True)
             vector_db = self.vector_store_service.create_vector_store(

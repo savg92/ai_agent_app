@@ -12,7 +12,7 @@ from langchain_core.vectorstores import VectorStore
 # Import modular components
 from config import get_settings, get_paths
 from core.types import EmbeddingConfig
-from services import DocumentService, VectorStoreService, QAService, VectorStoreManager
+from services import DocumentService, VectorStoreService, QAService, VectorStoreManager, APIHandlerService
 from services.configuration_service import ConfigurationService
 from providers import EmbeddingProviderFactory, LLMProviderFactory
 from api.routes import router
@@ -38,9 +38,12 @@ async def lifespan(app: FastAPI):
         vector_store_manager = VectorStoreManager(vector_store_service)
         qa_service = QAService()
         config_service = ConfigurationService()
+        api_handler_service = APIHandlerService()
         
-        # Set global vector store manager for routes
+        # Set global services for routes
         routes_module.vector_store_manager = vector_store_manager
+        routes_module.api_handler = api_handler_service
+        api_handler_service.set_vector_store_manager(vector_store_manager)
         
         # Get providers
         embedding_func = EmbeddingProviderFactory.create_embedding_function()
@@ -86,9 +89,9 @@ async def lifespan(app: FastAPI):
         # Set this as the active store
         vector_store_manager.set_active_store(current_config)
 
-        # Create QA chain and set it globally for routes
+        # Create QA chain and set it in the handler service
         qa_chain = qa_service.create_qa_chain(vector_db, llm)
-        routes_module.qa_chain = qa_chain
+        api_handler_service.set_qa_chain(qa_chain)
         
         logging.info("QA Chain initialized successfully.")
 

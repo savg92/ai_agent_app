@@ -3,7 +3,7 @@
 import logging
 from typing import List, Tuple, Dict, Any
 from langchain.chains import ConversationalRetrievalChain
-from langchain_core.language_models.llms import BaseLanguageModel
+from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.vectorstores import VectorStore
 from langchain_core.documents import Document
 
@@ -27,7 +27,7 @@ class QAService:
         score_threshold = getattr(self.settings, 'retriever_score_threshold', None)
         logging.info(f"Retriever config: k={retriever_k}, type={search_type}, threshold={score_threshold}")
 
-        search_kwargs = {"k": retriever_k}
+        search_kwargs: Dict[str, Any] = {"k": retriever_k}
         if search_type == "mmr":
             search_kwargs.update({"fetch_k": max(retriever_k * 2, retriever_k + 1), "lambda_mult": 0.5})
         if search_type == "similarity_score_threshold" and score_threshold is not None:

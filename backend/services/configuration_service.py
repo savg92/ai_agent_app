@@ -18,13 +18,22 @@ class ConfigurationService:
     def get_current_embedding_config(self) -> EmbeddingConfig:
         """Get current embedding configuration for comparison."""
         provider = self.settings.embedding_provider
-        config: EmbeddingConfig = {"provider": provider}
+        # initialize all required keys to satisfy the EmbeddingConfig TypedDict
+        config: EmbeddingConfig = {
+            "provider": provider,
+            "model": "",
+            "deployment": "",
+            "model_id": "",
+            "base_url": "",
+            "endpoint": "",
+            "region": "",
+        }
         
         if provider == "openai":
             config["model"] = "text-embedding-ada-002"  # Default OpenAI model
         elif provider == "ollama":
             config["model"] = self.settings.ollama_embedding_model or ""
-            config["base_url"] = self.settings.ollama_base_url
+            config["base_url"] = self.settings.ollama_base_url or ""
         elif provider == "azure":
             config["deployment"] = self.settings.azure_embedding_deployment or ""
             config["endpoint"] = self.settings.azure_endpoint or ""
@@ -33,7 +42,7 @@ class ConfigurationService:
             config["region"] = self.settings.aws_region or ""
         elif provider == "lmstudio":
             config["model"] = self.settings.lm_studio_embedding_model or ""
-            config["base_url"] = self.settings.lm_studio_base_url
+            config["base_url"] = self.settings.lm_studio_base_url or ""
         else:
             config["model"] = "all-MiniLM-L6-v2"  # Default HuggingFace model
         
